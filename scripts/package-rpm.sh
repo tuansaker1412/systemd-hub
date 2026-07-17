@@ -16,8 +16,14 @@ ARCH="${ARCH:-x86_64}"
 BINARY="${BINARY:-target/release/systemd-hub}"
 OUT_DIR="${OUT_DIR:-dist}"
 
+ICON_SRC="${ICON_SRC:-data/icons/systemd-hub.svg}"
+
 if [[ ! -f "$BINARY" ]]; then
   echo "error: binary not found at $BINARY" >&2
+  exit 1
+fi
+if [[ ! -f "$ICON_SRC" ]]; then
+  echo "error: icon not found at $ICON_SRC" >&2
   exit 1
 fi
 
@@ -38,6 +44,7 @@ mkdir -p "$WORK"/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
 install -m 755 "$BINARY" "$WORK/SOURCES/systemd-hub"
 install -m 644 data/dev.systemdhub.SystemdHub.desktop \
   "$WORK/SOURCES/dev.systemdhub.SystemdHub.desktop"
+install -m 644 "$ICON_SRC" "$WORK/SOURCES/systemd-hub.svg"
 install -m 644 README.md "$WORK/SOURCES/README.md"
 install -m 644 LICENSE "$WORK/SOURCES/LICENSE"
 
@@ -52,6 +59,7 @@ Source0:        systemd-hub
 Source1:        dev.systemdhub.SystemdHub.desktop
 Source2:        README.md
 Source3:        LICENSE
+Source4:        systemd-hub.svg
 BuildArch:      ${ARCH}
 
 Requires:       gtk4 libadwaita
@@ -77,10 +85,29 @@ install -Dm644 %{SOURCE1} \\
   %{buildroot}%{_datadir}/applications/dev.systemdhub.SystemdHub.desktop
 install -Dm644 %{SOURCE2} %{buildroot}%{_docdir}/%{name}/README.md
 install -Dm644 %{SOURCE3} %{buildroot}%{_docdir}/%{name}/LICENSE
+install -Dm644 %{SOURCE4} \\
+  %{buildroot}%{_datadir}/icons/hicolor/scalable/apps/systemd-hub.svg
+
+%post
+if command -v update-desktop-database >/dev/null 2>&1; then
+  update-desktop-database -q %{_datadir}/applications 2>/dev/null || :
+fi
+if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+  gtk-update-icon-cache -f -t %{_datadir}/icons/hicolor 2>/dev/null || :
+fi
+
+%postun
+if command -v update-desktop-database >/dev/null 2>&1; then
+  update-desktop-database -q %{_datadir}/applications 2>/dev/null || :
+fi
+if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+  gtk-update-icon-cache -f -t %{_datadir}/icons/hicolor 2>/dev/null || :
+fi
 
 %files
 %{_bindir}/systemd-hub
 %{_datadir}/applications/dev.systemdhub.SystemdHub.desktop
+%{_datadir}/icons/hicolor/scalable/apps/systemd-hub.svg
 %{_docdir}/%{name}/README.md
 %{_docdir}/%{name}/LICENSE
 

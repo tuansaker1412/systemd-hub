@@ -167,12 +167,12 @@ RUST_LOG=debug cargo run
 3. Optional local packaging (after `cargo build --release`):
 
 ```bash
-VERSION=0.1.2 DISTRO=ubuntu-24.04 scripts/package-tarball.sh
-VERSION=0.1.2 DISTRO=ubuntu-24.04 scripts/package-deb.sh
+VERSION=0.1.3 DISTRO=ubuntu-24.04 scripts/package-tarball.sh
+VERSION=0.1.3 DISTRO=ubuntu-24.04 scripts/package-deb.sh
 # On Fedora with rpm-build installed:
-VERSION=0.1.2 DISTRO=fedora-latest scripts/package-rpm.sh
+VERSION=0.1.3 DISTRO=fedora-latest scripts/package-rpm.sh
 # AppImage (needs linuxdeploy tools; downloaded automatically):
-VERSION=0.1.2 scripts/package-appimage.sh
+VERSION=0.1.3 scripts/package-appimage.sh
 ```
 
 ---
@@ -242,15 +242,15 @@ GitHub Actions workflows live under `.github/workflows/`:
 3. Tag and push:
 
 ```bash
-git tag v0.1.2
-git push origin v0.1.2
+git tag v0.1.3
+git push origin v0.1.3
 ```
 
 ---
 
 ## 📝 Changelog
 
-See [CHANGELOG.md](CHANGELOG.md) for release notes. Latest: **v0.1.2**.
+See [CHANGELOG.md](CHANGELOG.md) for release notes. Latest: **v0.1.3**.
 
 ---
 

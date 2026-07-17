@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-07-17
+
+Packaging and branding fix so installed releases show the Systemd Hub logo.
+
+### Fixed
+
+- Install the app icon into the FreeDesktop hicolor theme for **`.deb`**, **`.rpm`**, and **tarball** packages (`share/icons/hicolor/scalable/apps/systemd-hub.svg`)
+- Desktop launcher / menu no longer falls back to a generic icon after package install
+- About dialog `application_icon` now uses `systemd-hub` instead of `application-x-executable`
+
+### Changed
+
+- Application version bumped to **0.1.3**
+- Tarball `INSTALL.txt` and release notes document user-local and system icon install paths
+- deb/rpm refresh desktop database and icon cache in post-install hooks
+
 ## [0.1.2] - 2026-07-17
 
 First packaged release after the initial MVP. Includes settings, About, branding, packaging, and CI.
@@ -59,6 +75,7 @@ Initial MVP of Systemd Hub.
 - Toast feedback for actions and errors
 - Keyboard shortcuts: `Ctrl+Q`, `Ctrl+R`, `Ctrl+Shift+R`
 
-[Unreleased]: https://github.com/tuansaker1412/systemd-hub/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/tuansaker1412/systemd-hub/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/tuansaker1412/systemd-hub/releases/tag/v0.1.3
 [0.1.2]: https://github.com/tuansaker1412/systemd-hub/releases/tag/v0.1.2
 [0.1.0]: https://github.com/tuansaker1412/systemd-hub/releases/tag/v0.1.0

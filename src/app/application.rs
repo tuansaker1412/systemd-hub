@@ -50,7 +50,7 @@ impl SystemdHubApplication {
         let window = self.active_window();
         let dialog = adw::AboutDialog::builder()
             .application_name("Systemd Hub")
-            .application_icon("application-x-executable")
+            .application_icon("systemd-hub")
             .developer_name("Ngọc Tuấn")
             .version(env!("CARGO_PKG_VERSION"))
             .comments("Native Linux systemd service manager")

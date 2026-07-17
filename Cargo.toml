@@ -1,6 +1,6 @@
 [package]
 name = "systemd-hub"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2021"
 description = "Native Linux systemd service manager"
 license = "GPL-3.0-or-later"

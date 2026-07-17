@@ -380,9 +380,13 @@ jobs:
             ```bash
             tar -xzf systemd-hub-*-ubuntu-24.04-x86_64.tar.gz
             cd systemd-hub-*/
-            mkdir -p ~/.local/bin ~/.local/share/applications
+            mkdir -p ~/.local/bin \
+                     ~/.local/share/applications \
+                     ~/.local/share/icons/hicolor/scalable/apps
             cp bin/systemd-hub ~/.local/bin/
             cp share/applications/*.desktop ~/.local/share/applications/
+            cp share/icons/hicolor/scalable/apps/systemd-hub.svg \
+               ~/.local/share/icons/hicolor/scalable/apps/
             ```
 
             Verify downloads with `SHA256SUMS`.
