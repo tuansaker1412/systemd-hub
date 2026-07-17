@@ -1,10 +1,15 @@
 [package]
 name = "systemd-hub"
-version = "0.1.0"
+version = "0.1.2"
 edition = "2021"
 description = "Native Linux systemd service manager"
 license = "GPL-3.0-or-later"
-authors = ["Systemd Hub Contributors"]
+authors = ["Ngọc Tuấn <https://github.com/tuansaker1412>"]
+repository = "https://github.com/tuansaker1412/systemd-hub"
+homepage = "https://github.com/tuansaker1412/systemd-hub"
+readme = "README.md"
+keywords = ["systemd", "gtk", "libadwaita", "linux", "services"]
+categories = ["gui"]
 
 [dependencies]
 gtk4 = { version = "0.9", package = "gtk4", features = ["v4_12"] }

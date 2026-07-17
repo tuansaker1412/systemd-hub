@@ -10,7 +10,7 @@
 
 **A native Linux desktop app for managing systemd services**
 
-[Features](#-features) • [Installation](#-installation) • [Build from source](#-build-from-source) • [Architecture](#-architecture) • [Contributing](#-contributing)
+[Features](#-features) • [Installation](#-installation) • [Build from source](#-build-from-source) • [Architecture](#-architecture) • [Changelog](#-changelog) • [Contributing](#-contributing)
 
 </div>
 
@@ -52,8 +52,9 @@ The app talks to systemd over D-Bus (`org.freedesktop.systemd1`) instead of spaw
 | Feature | Status |
 |---------|--------|
 | Native GTK 4 + libadwaita UI | ✅ |
-| System light / dark theme | ✅ |
-| Sidebar navigation (Dashboard / Services) | ✅ |
+| Theme: System / Light / Dark (Settings) | ✅ |
+| Sidebar navigation (Dashboard / Services / Settings / About) | ✅ |
+| About page (logo, version, developer, repo & issues) | ✅ |
 | Toast feedback for actions and errors | ✅ |
 | Keyboard shortcuts | ✅ |
 | Unit file editor | 🔜 |
@@ -166,12 +167,12 @@ RUST_LOG=debug cargo run
 3. Optional local packaging (after `cargo build --release`):
 
 ```bash
-VERSION=0.1.0 DISTRO=ubuntu-24.04 scripts/package-tarball.sh
-VERSION=0.1.0 DISTRO=ubuntu-24.04 scripts/package-deb.sh
+VERSION=0.1.2 DISTRO=ubuntu-24.04 scripts/package-tarball.sh
+VERSION=0.1.2 DISTRO=ubuntu-24.04 scripts/package-deb.sh
 # On Fedora with rpm-build installed:
-VERSION=0.1.0 DISTRO=fedora-latest scripts/package-rpm.sh
+VERSION=0.1.2 DISTRO=fedora-latest scripts/package-rpm.sh
 # AppImage (needs linuxdeploy tools; downloaded automatically):
-VERSION=0.1.0 scripts/package-appimage.sh
+VERSION=0.1.2 scripts/package-appimage.sh
 ```
 
 ---
@@ -236,14 +237,20 @@ GitHub Actions workflows live under `.github/workflows/`:
 
 ### Create a release
 
-1. Bump `version` in `Cargo.toml` if needed.
+1. Bump `version` in `Cargo.toml` and update [CHANGELOG.md](CHANGELOG.md).
 2. Commit and push to `main`.
 3. Tag and push:
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.1.2
+git push origin v0.1.2
 ```
+
+---
+
+## 📝 Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for release notes. Latest: **v0.1.2**.
 
 ---
 
@@ -251,7 +258,7 @@ git push origin v0.1.0
 
 - Privileged service actions may trigger **Polkit** authentication on the system bus.
 - Journal output and unit metadata can contain sensitive information — be careful with logs, screenshots, and test fixtures.
-- Dark / light mode follows the system color scheme via libadwaita.
+- Theme preference (System / Light / Dark) is configurable in **Settings** and stored under `~/.config/systemd-hub/settings`.
 
 ---
 

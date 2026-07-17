@@ -110,7 +110,9 @@ Các model nên giữ logic domain nhỏ, ví dụ `status_label()` hoặc `is_r
 - Start, Stop, Restart, Reload, Enable, Disable qua D-Bus.
 - Log viewer qua `journalctl`.
 - Search, refresh, follow logs.
-- Giao diện libadwaita hỗ trợ light/dark mode theo hệ thống.
+- Settings: theme System / Light / Dark (lưu XDG config).
+- About: logo, version, developer, repo và issues.
+- Giao diện libadwaita (theme theo hệ thống hoặc ép Light/Dark).
 
 ## Lệnh Phát Triển
 
