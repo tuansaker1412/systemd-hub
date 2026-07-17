@@ -1,0 +1,27 @@
+[package]
+name = "systemd-hub"
+version = "0.1.0"
+edition = "2021"
+description = "Native Linux systemd service manager"
+license = "GPL-3.0-or-later"
+authors = ["Systemd Hub Contributors"]
+
+[dependencies]
+gtk4 = { version = "0.9", package = "gtk4", features = ["v4_12"] }
+libadwaita = { version = "0.7", features = ["v1_5"] }
+glib = "0.20"
+gio = "0.20"
+zbus = { version = "5", default-features = false, features = ["tokio"] }
+zvariant = "5"
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros", "process", "io-util"] }
+serde = { version = "1", features = ["derive"] }
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+once_cell = "1"
+async-channel = "2"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
