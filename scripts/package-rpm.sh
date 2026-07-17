@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # Create a simple .rpm package for Fedora/RHEL-family systems.
+#
+# Packages a prebuilt binary (no in-spec compile). Requires rpmbuild.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -24,19 +26,20 @@ if ! command -v rpmbuild >/dev/null 2>&1; then
   exit 1
 fi
 
-WORK="${OUT_DIR}/rpmbuild"
+mkdir -p "$OUT_DIR"
+# Absolute _topdir is required: relative paths break %prep on modern rpm (Fedora)
+# because the build script cds into BUILD and re-expands relative topdir.
+OUT_DIR_ABS="$(cd "$OUT_DIR" && pwd)"
+WORK="${OUT_DIR_ABS}/rpmbuild"
 rm -rf "$WORK"
 mkdir -p "$WORK"/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
 
-# Source layout consumed by the spec %install section
-SRC_DIR="${WORK}/SOURCES/systemd-hub-${RPM_VERSION}"
-mkdir -p "$SRC_DIR/bin" "$SRC_DIR/share/applications" "$SRC_DIR/share/doc/systemd-hub"
-install -m 755 "$BINARY" "$SRC_DIR/bin/systemd-hub"
+# Stage prebuilt payload as Source files (no %setup / source tarball unpack).
+install -m 755 "$BINARY" "$WORK/SOURCES/systemd-hub"
 install -m 644 data/dev.systemdhub.SystemdHub.desktop \
-  "$SRC_DIR/share/applications/dev.systemdhub.SystemdHub.desktop"
-install -m 644 README.md LICENSE "$SRC_DIR/share/doc/systemd-hub/"
-tar -C "$WORK/SOURCES" -czf "$WORK/SOURCES/systemd-hub-${RPM_VERSION}.tar.gz" \
-  "systemd-hub-${RPM_VERSION}"
+  "$WORK/SOURCES/dev.systemdhub.SystemdHub.desktop"
+install -m 644 README.md "$WORK/SOURCES/README.md"
+install -m 644 LICENSE "$WORK/SOURCES/LICENSE"
 
 cat >"$WORK/SPECS/systemd-hub.spec" <<EOF
 Name:           systemd-hub
@@ -44,8 +47,11 @@ Version:        ${RPM_VERSION}
 Release:        ${RELEASE}%{?dist}
 Summary:        Native Linux systemd service manager
 License:        GPL-3.0-or-later
-URL:            https://github.com/systemdhub/systemd-hub
-Source0:        %{name}-%{version}.tar.gz
+URL:            https://github.com/tuansaker1412/systemd-hub
+Source0:        systemd-hub
+Source1:        dev.systemdhub.SystemdHub.desktop
+Source2:        README.md
+Source3:        LICENSE
 BuildArch:      ${ARCH}
 
 Requires:       gtk4 libadwaita
@@ -55,20 +61,22 @@ Systemd Hub is a GTK 4 / libadwaita desktop app for managing
 systemd services over D-Bus (start/stop/restart, logs, dashboard).
 Built against ${DISTRO}.
 
+# Prebuilt binary packaging: nothing to unpack or compile.
+# Avoid %setup so relative/builddir layout differences across rpm
+# versions (e.g. Fedora rpm 4.20+) cannot break %prep.
 %prep
-%setup -q
+:
 
 %build
-# Prebuilt binary from CI
+:
 
 %install
-install -Dm755 bin/systemd-hub %{buildroot}%{_bindir}/systemd-hub
-install -Dm644 share/applications/dev.systemdhub.SystemdHub.desktop \\
+rm -rf %{buildroot}
+install -Dm755 %{SOURCE0} %{buildroot}%{_bindir}/systemd-hub
+install -Dm644 %{SOURCE1} \\
   %{buildroot}%{_datadir}/applications/dev.systemdhub.SystemdHub.desktop
-install -Dm644 share/doc/systemd-hub/README.md \\
-  %{buildroot}%{_docdir}/%{name}/README.md
-install -Dm644 share/doc/systemd-hub/LICENSE \\
-  %{buildroot}%{_docdir}/%{name}/LICENSE
+install -Dm644 %{SOURCE2} %{buildroot}%{_docdir}/%{name}/README.md
+install -Dm644 %{SOURCE3} %{buildroot}%{_docdir}/%{name}/LICENSE
 
 %files
 %{_bindir}/systemd-hub
@@ -77,7 +85,7 @@ install -Dm644 share/doc/systemd-hub/LICENSE \\
 %{_docdir}/%{name}/LICENSE
 
 %changelog
-* $(date '+%a %b %d %Y') Systemd Hub Contributors <noreply@systemdhub.dev> - ${RPM_VERSION}-${RELEASE}
+* $(date '+%a %b %d %Y') Ngọc Tuấn <https://github.com/tuansaker1412> - ${RPM_VERSION}-${RELEASE}
 - Automated release package
 EOF
 
@@ -86,18 +94,13 @@ rpmbuild \
   --define "_build_id_links none" \
   -bb "$WORK/SPECS/systemd-hub.spec"
 
-mkdir -p "$OUT_DIR"
 RPM_FILE="$(find "$WORK/RPMS" -type f -name '*.rpm' | head -1)"
 if [[ -z "$RPM_FILE" ]]; then
   echo "error: rpmbuild did not produce an rpm" >&2
   exit 1
 fi
 
-BASE="$(basename "$RPM_FILE")"
-# Include distro label for multi-target releases
-DEST="${OUT_DIR}/${BASE%.rpm}.${DISTRO}.rpm"
-# If basename already unique, still copy with clear name
-DEST="${OUT_DIR}/systemd-hub-${RPM_VERSION}-${RELEASE}.${DISTRO}.${ARCH}.rpm"
+DEST="${OUT_DIR_ABS}/systemd-hub-${RPM_VERSION}-${RELEASE}.${DISTRO}.${ARCH}.rpm"
 cp "$RPM_FILE" "$DEST"
 
 echo "Created $DEST"
