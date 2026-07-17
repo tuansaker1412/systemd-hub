@@ -11,7 +11,9 @@ use std::time::Duration;
 
 use crate::models::{ServiceAction, UnitSummary};
 use crate::services::{JournalService, SettingsService, SystemInfoService, UnitService};
-use crate::ui::{DashboardPage, InspectorPage, ServicesView, SettingsPage, Sidebar, SidebarPage};
+use crate::ui::{
+    AboutPage, DashboardPage, InspectorPage, ServicesView, SettingsPage, Sidebar, SidebarPage,
+};
 use crate::RUNTIME;
 
 const FOLLOW_INTERVAL_MS: u64 = 2_000;
@@ -45,6 +47,7 @@ mod imp {
         pub dashboard: RefCell<Option<DashboardPage>>,
         pub services_view: RefCell<Option<ServicesView>>,
         pub settings_page: RefCell<Option<SettingsPage>>,
+        pub about_page: RefCell<Option<AboutPage>>,
         pub unit_service: RefCell<Option<UnitService>>,
         pub selected_unit: RefCell<Option<String>>,
         pub follow_source: RefCell<Option<SourceId>>,
@@ -95,6 +98,7 @@ impl SystemdHubWindow {
         let services_view = ServicesView::new();
         let settings_page = SettingsPage::new();
         settings_page.set_theme(SettingsService::load_theme());
+        let about_page = AboutPage::new();
 
         let content_stack = gtk::Stack::new();
         content_stack.set_hexpand(true);
@@ -102,6 +106,7 @@ impl SystemdHubWindow {
         content_stack.add_named(&dashboard.widget, Some("dashboard"));
         content_stack.add_named(&services_view.widget, Some("services"));
         content_stack.add_named(&settings_page.widget, Some("settings"));
+        content_stack.add_named(&about_page.widget, Some("about"));
         content_stack.set_visible_child_name("dashboard");
 
         let sidebar_page = adw::NavigationPage::builder()
@@ -130,6 +135,7 @@ impl SystemdHubWindow {
         *imp.dashboard.borrow_mut() = Some(dashboard);
         *imp.services_view.borrow_mut() = Some(services_view);
         *imp.settings_page.borrow_mut() = Some(settings_page);
+        *imp.about_page.borrow_mut() = Some(about_page);
 
         sidebar.connect_page_selected(clone!(
             #[weak(rename_to = window)]
@@ -144,6 +150,7 @@ impl SystemdHubWindow {
                         SidebarPage::Dashboard => stack.set_visible_child_name("dashboard"),
                         SidebarPage::Services => stack.set_visible_child_name("services"),
                         SidebarPage::Settings => stack.set_visible_child_name("settings"),
+                        SidebarPage::About => stack.set_visible_child_name("about"),
                     }
                 }
                 if page == SidebarPage::Dashboard {

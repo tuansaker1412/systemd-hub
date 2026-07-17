@@ -1,5 +1,6 @@
 //! GTK widgets and pages. No direct D-Bus access.
 
+mod about;
 mod dashboard;
 mod log_viewer;
 mod service_detail;
@@ -9,6 +10,7 @@ mod settings;
 mod sidebar;
 mod unit_object;
 
+pub use about::AboutPage;
 pub use dashboard::DashboardPage;
 pub use log_viewer::LogViewer;
 pub use service_detail::ServiceDetailPage;

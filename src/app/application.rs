@@ -51,12 +51,21 @@ impl SystemdHubApplication {
         let dialog = adw::AboutDialog::builder()
             .application_name("Systemd Hub")
             .application_icon("application-x-executable")
-            .developer_name("Systemd Hub Contributors")
+            .developer_name("Ngọc Tuấn")
             .version(env!("CARGO_PKG_VERSION"))
             .comments("Native Linux systemd service manager")
             .license_type(gtk::License::Gpl30)
-            .developers(vec!["Systemd Hub Contributors".to_string()])
+            .developers(vec!["Ngọc Tuấn".to_string()])
+            .copyright("© Ngọc Tuấn")
+            .website("https://github.com/tuansaker1412/systemd-hub")
+            .issue_url("https://github.com/tuansaker1412/systemd-hub/issues")
             .build();
+        dialog.add_link("Developer", "https://github.com/tuansaker1412");
+        dialog.add_link("Repository", "https://github.com/tuansaker1412/systemd-hub");
+        dialog.add_link(
+            "Report an Issue",
+            "https://github.com/tuansaker1412/systemd-hub/issues",
+        );
         dialog.present(window.as_ref());
     }
 }

@@ -10,6 +10,7 @@ pub enum SidebarPage {
     Dashboard,
     Services,
     Settings,
+    About,
 }
 
 pub struct Sidebar {
@@ -35,6 +36,7 @@ impl Sidebar {
             "preferences-system-symbolic",
             "settings",
         ));
+        list.append(&Self::row("About", "help-about-symbolic", "about"));
 
         // Select dashboard by default.
         if let Some(row) = list.row_at_index(0) {
@@ -91,6 +93,7 @@ impl Sidebar {
             let page = match row.widget_name().as_str() {
                 "services" => SidebarPage::Services,
                 "settings" => SidebarPage::Settings,
+                "about" => SidebarPage::About,
                 _ => SidebarPage::Dashboard,
             };
             f(page);
