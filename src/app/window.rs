@@ -10,8 +10,8 @@ use std::cell::{Cell, RefCell};
 use std::time::Duration;
 
 use crate::models::{ServiceAction, UnitSummary};
-use crate::services::{JournalService, SystemInfoService, UnitService};
-use crate::ui::{DashboardPage, InspectorPage, ServicesView, Sidebar, SidebarPage};
+use crate::services::{JournalService, SettingsService, SystemInfoService, UnitService};
+use crate::ui::{DashboardPage, InspectorPage, ServicesView, SettingsPage, Sidebar, SidebarPage};
 use crate::RUNTIME;
 
 const FOLLOW_INTERVAL_MS: u64 = 2_000;
@@ -44,6 +44,7 @@ mod imp {
         pub content_stack: RefCell<Option<gtk::Stack>>,
         pub dashboard: RefCell<Option<DashboardPage>>,
         pub services_view: RefCell<Option<ServicesView>>,
+        pub settings_page: RefCell<Option<SettingsPage>>,
         pub unit_service: RefCell<Option<UnitService>>,
         pub selected_unit: RefCell<Option<String>>,
         pub follow_source: RefCell<Option<SourceId>>,
@@ -92,12 +93,15 @@ impl SystemdHubWindow {
         let sidebar = Sidebar::new();
         let dashboard = DashboardPage::new();
         let services_view = ServicesView::new();
+        let settings_page = SettingsPage::new();
+        settings_page.set_theme(SettingsService::load_theme());
 
         let content_stack = gtk::Stack::new();
         content_stack.set_hexpand(true);
         content_stack.set_vexpand(true);
         content_stack.add_named(&dashboard.widget, Some("dashboard"));
         content_stack.add_named(&services_view.widget, Some("services"));
+        content_stack.add_named(&settings_page.widget, Some("settings"));
         content_stack.set_visible_child_name("dashboard");
 
         let sidebar_page = adw::NavigationPage::builder()
@@ -125,6 +129,7 @@ impl SystemdHubWindow {
         *imp.content_stack.borrow_mut() = Some(content_stack);
         *imp.dashboard.borrow_mut() = Some(dashboard);
         *imp.services_view.borrow_mut() = Some(services_view);
+        *imp.settings_page.borrow_mut() = Some(settings_page);
 
         sidebar.connect_page_selected(clone!(
             #[weak(rename_to = window)]
@@ -138,6 +143,7 @@ impl SystemdHubWindow {
                     match page {
                         SidebarPage::Dashboard => stack.set_visible_child_name("dashboard"),
                         SidebarPage::Services => stack.set_visible_child_name("services"),
+                        SidebarPage::Settings => stack.set_visible_child_name("settings"),
                     }
                 }
                 if page == SidebarPage::Dashboard {
@@ -145,6 +151,19 @@ impl SystemdHubWindow {
                 }
             }
         ));
+
+        if let Some(page) = imp.settings_page.borrow().as_ref() {
+            page.connect_theme_changed(clone!(
+                #[weak(rename_to = window)]
+                self,
+                move |theme| {
+                    if let Err(e) = SettingsService::set_theme(theme) {
+                        tracing::error!(error = %e, "failed to save theme preference");
+                        window.toast(&format!("Failed to save theme: {e}"));
+                    }
+                }
+            ));
+        }
 
         if let Some(view) = imp.services_view.borrow().as_ref() {
             view.connect_selection_changed(clone!(

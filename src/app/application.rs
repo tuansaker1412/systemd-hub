@@ -100,9 +100,8 @@ mod imp {
             let app = self.obj();
             app.setup_actions();
 
-            // Follow system light/dark preference (Wayland/X11/HiDPI handled by GTK).
-            let style = adw::StyleManager::default();
-            style.set_color_scheme(adw::ColorScheme::Default);
+            // Restore saved theme (System / Light / Dark) before any window is shown.
+            crate::services::SettingsService::load_and_apply_theme();
         }
     }
 

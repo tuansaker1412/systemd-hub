@@ -9,6 +9,7 @@ use libadwaita as adw;
 pub enum SidebarPage {
     Dashboard,
     Services,
+    Settings,
 }
 
 pub struct Sidebar {
@@ -28,6 +29,11 @@ impl Sidebar {
             "Services",
             "application-x-executable-symbolic",
             "services",
+        ));
+        list.append(&Self::row(
+            "Settings",
+            "preferences-system-symbolic",
+            "settings",
         ));
 
         // Select dashboard by default.
@@ -84,6 +90,7 @@ impl Sidebar {
             let Some(row) = row else { return };
             let page = match row.widget_name().as_str() {
                 "services" => SidebarPage::Services,
+                "settings" => SidebarPage::Settings,
                 _ => SidebarPage::Dashboard,
             };
             f(page);
