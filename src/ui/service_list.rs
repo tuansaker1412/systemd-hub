@@ -89,8 +89,14 @@ impl ServiceListPage {
         let filter_model = FilterListModel::new(Some(store.clone()), Some(filter.clone()));
 
         let name_sorter = CustomSorter::new(|a, b| {
-            let a = a.downcast_ref::<UnitObject>().map(|u| u.name()).unwrap_or_default();
-            let b = b.downcast_ref::<UnitObject>().map(|u| u.name()).unwrap_or_default();
+            let a = a
+                .downcast_ref::<UnitObject>()
+                .map(|u| u.name())
+                .unwrap_or_default();
+            let b = b
+                .downcast_ref::<UnitObject>()
+                .map(|u| u.name())
+                .unwrap_or_default();
             a.to_lowercase().cmp(&b.to_lowercase()).into()
         });
 
@@ -117,12 +123,7 @@ impl ServiceListPage {
             true,
             |u| u.name(),
             |_| StateTone::Normal,
-            |a, b| {
-                a.name()
-                    .to_lowercase()
-                    .cmp(&b.name().to_lowercase())
-                    .into()
-            },
+            |a, b| a.name().to_lowercase().cmp(&b.name().to_lowercase()).into(),
         ));
         column_view.append_column(&Self::text_column(
             "Description",
@@ -188,7 +189,10 @@ impl ServiceListPage {
 
         let header = adw::HeaderBar::new();
         header.set_title_widget(Some(
-            &Label::builder().label("Services").css_classes(["title"]).build(),
+            &Label::builder()
+                .label("Services")
+                .css_classes(["title"])
+                .build(),
         ));
 
         let bottom = gtk::Box::new(Orientation::Horizontal, 8);
@@ -250,8 +254,12 @@ impl ServiceListPage {
         factory.connect_bind(move |_, item| {
             let list_item = item.downcast_ref::<gtk::ListItem>().expect("ListItem");
             let Some(obj) = list_item.item() else { return };
-            let Some(unit) = obj.downcast_ref::<UnitObject>() else { return };
-            let Some(child) = list_item.child() else { return };
+            let Some(unit) = obj.downcast_ref::<UnitObject>() else {
+                return;
+            };
+            let Some(child) = list_item.child() else {
+                return;
+            };
             if let Ok(label) = child.downcast::<Label>() {
                 label.set_label(&get_bind(unit));
                 apply_tone(&label, tone_bind(unit));
@@ -295,9 +303,15 @@ impl ServiceListPage {
         factory.connect_bind(move |_, item| {
             let list_item = item.downcast_ref::<gtk::ListItem>().expect("ListItem");
             let Some(obj) = list_item.item() else { return };
-            let Some(unit) = obj.downcast_ref::<UnitObject>() else { return };
-            let Some(child) = list_item.child() else { return };
-            let Ok(image) = child.downcast::<Image>() else { return };
+            let Some(unit) = obj.downcast_ref::<UnitObject>() else {
+                return;
+            };
+            let Some(child) = list_item.child() else {
+                return;
+            };
+            let Ok(image) = child.downcast::<Image>() else {
+                return;
+            };
 
             let summary = unit.summary();
             image.set_icon_name(Some(active_state_icon(&summary.active_state)));
@@ -343,17 +357,19 @@ impl ServiceListPage {
         factory.connect_bind(move |_, item| {
             let list_item = item.downcast_ref::<gtk::ListItem>().expect("ListItem");
             let Some(obj) = list_item.item() else { return };
-            let Some(unit) = obj.downcast_ref::<UnitObject>() else { return };
-            let Some(child) = list_item.child() else { return };
-            let Ok(check) = child.downcast::<CheckButton>() else { return };
+            let Some(unit) = obj.downcast_ref::<UnitObject>() else {
+                return;
+            };
+            let Some(child) = list_item.child() else {
+                return;
+            };
+            let Ok(check) = child.downcast::<CheckButton>() else {
+                return;
+            };
 
             let running = unit.active_state() == "active";
             check.set_active(running);
-            check.set_tooltip_text(Some(if running {
-                "Running"
-            } else {
-                "Not running"
-            }));
+            check.set_tooltip_text(Some(if running { "Running" } else { "Not running" }));
         });
 
         let sorter = CustomSorter::new(|a, b| {
@@ -384,8 +400,10 @@ impl ServiceListPage {
         for unit in units {
             self.store.append(&UnitObject::new(unit));
         }
-        self.status_label
-            .set_label(&format!("{count} service{}", if count == 1 { "" } else { "s" }));
+        self.status_label.set_label(&format!(
+            "{count} service{}",
+            if count == 1 { "" } else { "s" }
+        ));
         self.filter.changed(FilterChange::Different);
     }
 

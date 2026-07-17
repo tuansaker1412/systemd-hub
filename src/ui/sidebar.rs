@@ -24,7 +24,11 @@ impl Sidebar {
             .build();
 
         list.append(&Self::row("Dashboard", "view-grid-symbolic", "dashboard"));
-        list.append(&Self::row("Services", "application-x-executable-symbolic", "services"));
+        list.append(&Self::row(
+            "Services",
+            "application-x-executable-symbolic",
+            "services",
+        ));
 
         // Select dashboard by default.
         if let Some(row) = list.row_at_index(0) {

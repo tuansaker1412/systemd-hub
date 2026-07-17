@@ -53,9 +53,19 @@ impl UnitSummary {
             "running" | "listening" | "plugged" | "mounted" | "waiting" => StateTone::Success,
             "failed" | "auto-restart" => StateTone::Error,
             "dead" | "exited" => StateTone::Muted,
-            "start-pre" | "start" | "start-post" | "reload" | "stop" | "stop-watchdog"
-            | "stop-sigterm" | "stop-sigkill" | "stop-post" | "final-sigterm"
-            | "final-sigkill" | "auto-restart-queued" | "cleaning" => StateTone::Warning,
+            "start-pre"
+            | "start"
+            | "start-post"
+            | "reload"
+            | "stop"
+            | "stop-watchdog"
+            | "stop-sigterm"
+            | "stop-sigkill"
+            | "stop-post"
+            | "final-sigterm"
+            | "final-sigkill"
+            | "auto-restart-queued"
+            | "cleaning" => StateTone::Warning,
             _ => StateTone::Normal,
         }
     }
@@ -141,8 +151,14 @@ mod tests {
 
     #[test]
     fn active_state_tones_map_known_values() {
-        assert_eq!(summary("active", "running", "enabled").active_state_tone(), StateTone::Success);
-        assert_eq!(summary("failed", "failed", "enabled").active_state_tone(), StateTone::Error);
+        assert_eq!(
+            summary("active", "running", "enabled").active_state_tone(),
+            StateTone::Success
+        );
+        assert_eq!(
+            summary("failed", "failed", "enabled").active_state_tone(),
+            StateTone::Error
+        );
         assert_eq!(
             summary("activating", "start", "enabled").active_state_tone(),
             StateTone::Warning
@@ -155,9 +171,18 @@ mod tests {
 
     #[test]
     fn sub_and_enabled_state_tones_map_known_values() {
-        assert_eq!(summary("active", "running", "enabled").sub_state_tone(), StateTone::Success);
-        assert_eq!(summary("inactive", "dead", "disabled").sub_state_tone(), StateTone::Muted);
-        assert_eq!(summary("failed", "failed", "enabled").sub_state_tone(), StateTone::Error);
+        assert_eq!(
+            summary("active", "running", "enabled").sub_state_tone(),
+            StateTone::Success
+        );
+        assert_eq!(
+            summary("inactive", "dead", "disabled").sub_state_tone(),
+            StateTone::Muted
+        );
+        assert_eq!(
+            summary("failed", "failed", "enabled").sub_state_tone(),
+            StateTone::Error
+        );
         assert_eq!(
             summary("active", "running", "enabled").enabled_state_tone(),
             StateTone::Success

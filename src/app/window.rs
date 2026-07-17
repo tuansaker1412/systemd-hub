@@ -201,7 +201,9 @@ impl SystemdHubWindow {
             self,
             move |_, param| {
                 let Some(variant) = param else { return };
-                let Some(action_str) = variant.str() else { return };
+                let Some(action_str) = variant.str() else {
+                    return;
+                };
                 let action = match action_str {
                     "start" => ServiceAction::Start,
                     "stop" => ServiceAction::Stop,

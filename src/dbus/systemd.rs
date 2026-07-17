@@ -9,29 +9,20 @@ use crate::models::{ServiceAction, UnitDetail, UnitSummary};
 
 /// Tuple returned by Manager.ListUnits.
 type UnitTuple = (
-    String,           // name
-    String,           // description
-    String,           // load_state
-    String,           // active_state
-    String,           // sub_state
-    String,           // following
-    OwnedObjectPath,  // unit_path
-    u32,              // job_id
-    String,           // job_type
-    OwnedObjectPath,  // job_path
+    String,          // name
+    String,          // description
+    String,          // load_state
+    String,          // active_state
+    String,          // sub_state
+    String,          // following
+    OwnedObjectPath, // unit_path
+    u32,             // job_id
+    String,          // job_type
+    OwnedObjectPath, // job_path
 );
 
 /// systemd ExecStart property entry: (path, argv, ignore_failure, start_ts, exit_ts, pid, code, status)
-type ExecStartEntry = (
-    String,
-    Vec<String>,
-    bool,
-    u64,
-    u64,
-    u32,
-    i32,
-    i32,
-);
+type ExecStartEntry = (String, Vec<String>, bool, u64, u64, u32, i32, i32);
 
 #[proxy(
     interface = "org.freedesktop.systemd1.Manager",
@@ -138,10 +129,7 @@ impl SystemdClient {
             .await
             .context("failed to create Manager proxy")?;
 
-        let units = manager
-            .list_units()
-            .await
-            .context("ListUnits failed")?;
+        let units = manager.list_units().await.context("ListUnits failed")?;
 
         // One bulk call for enable states instead of N GetUnitFileState round-trips.
         let enable_map = match manager.list_unit_files().await {

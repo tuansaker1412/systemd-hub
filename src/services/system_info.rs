@@ -70,8 +70,7 @@ fn read_kernel_version() -> String {
 fn read_uptime_seconds() -> Result<u64> {
     let mut file = fs::File::open("/proc/uptime").context("open /proc/uptime")?;
     let mut buf = String::new();
-    file.read_to_string(&mut buf)
-        .context("read /proc/uptime")?;
+    file.read_to_string(&mut buf).context("read /proc/uptime")?;
     let first = buf
         .split_whitespace()
         .next()

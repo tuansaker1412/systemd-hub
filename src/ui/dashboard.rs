@@ -24,7 +24,10 @@ impl DashboardPage {
     pub fn new() -> Self {
         let header = adw::HeaderBar::new();
         header.set_title_widget(Some(
-            &Label::builder().label("Dashboard").css_classes(["title"]).build(),
+            &Label::builder()
+                .label("Dashboard")
+                .css_classes(["title"])
+                .build(),
         ));
 
         let content = gtk::Box::new(Orientation::Vertical, 18);

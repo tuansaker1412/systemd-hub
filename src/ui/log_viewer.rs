@@ -165,7 +165,9 @@ impl LogViewer {
         ));
 
         if self.auto_scroll.get() {
-            let mark = self.buffer.create_mark(None, &self.buffer.end_iter(), false);
+            let mark = self
+                .buffer
+                .create_mark(None, &self.buffer.end_iter(), false);
             self.text_view.scroll_to_mark(&mark, 0.0, true, 0.0, 1.0);
         }
     }
