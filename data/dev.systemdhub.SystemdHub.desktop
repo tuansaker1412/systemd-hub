@@ -2,9 +2,9 @@
 Name=Systemd Hub
 Comment=Native systemd service manager
 Exec=systemd-hub
-Icon=application-x-executable
+Icon=systemd-hub
 Terminal=false
 Type=Application
-Categories=System;Monitor;Settings;
+Categories=System;Monitor;
 Keywords=systemd;service;unit;journal;
 StartupNotify=true

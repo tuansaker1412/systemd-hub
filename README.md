@@ -36,6 +36,52 @@ Debug logging:
 RUST_LOG=debug cargo run
 ```
 
+## CI / CD & releases
+
+GitHub Actions workflows live under `.github/workflows/`:
+
+| Workflow | Trigger | What it does |
+|----------|---------|--------------|
+| **CI** (`ci.yml`) | Push / PR to `main` | `fmt`, `clippy`, `test`, `build` |
+| **Release** (`release.yml`) | Push tag `v*` (or manual dispatch) | Multi-distro release builds + GitHub Release |
+
+### Create a release
+
+1. Bump `version` in `Cargo.toml` if needed.
+2. Commit and push to `main`.
+3. Tag and push:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+The release job builds **x86_64** packages for:
+
+| Target | Artifacts |
+|--------|-----------|
+| **AppImage** (portable) | `.AppImage` (GTK 4 + libadwaita bundled) |
+| Ubuntu 24.04 | `.tar.gz`, `.deb` |
+| Debian Trixie | `.tar.gz`, `.deb` |
+| Fedora (latest) | `.tar.gz`, `.rpm` |
+
+Assets (plus `SHA256SUMS`) are attached to the GitHub Release for that tag.
+
+> **Note:** Native packages need **GTK 4.12+** and **libadwaita 1.5+** and are linked against the distro they were built on. Prefer the package that matches your system, or use the **AppImage** for a portable build (still requires a sufficiently recent glibc; built on Ubuntu 24.04).
+
+### Local packaging (optional)
+
+After `cargo build --release`:
+
+```bash
+VERSION=0.1.0 DISTRO=ubuntu-24.04 scripts/package-tarball.sh
+VERSION=0.1.0 DISTRO=ubuntu-24.04 scripts/package-deb.sh
+# On Fedora with rpm-build installed:
+VERSION=0.1.0 DISTRO=fedora-latest scripts/package-rpm.sh
+# AppImage (needs linuxdeploy tools; downloaded automatically):
+VERSION=0.1.0 scripts/package-appimage.sh
+```
+
 ## Architecture
 
 ```

@@ -1,0 +1,396 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (e.g. v0.1.0). Leave empty to use current ref."
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  # ── Build matrix for multiple Linux environments ──────────────────────────
+  build:
+    name: Build (${{ matrix.distro }})
+    runs-on: ubuntu-24.04
+    # Always use containers so each package matches a real distro userspace.
+    container: ${{ matrix.container }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Ubuntu 24.04 LTS — GTK 4.14 / libadwaita 1.5
+          - distro: ubuntu-24.04
+            container: ubuntu:24.04
+            pkg: deb
+            family: debian
+
+          # Debian testing (trixie) — newer GNOME stack
+          - distro: debian-trixie
+            container: debian:trixie
+            pkg: deb
+            family: debian
+
+          # Fedora latest — RPM family
+          - distro: fedora-latest
+            container: fedora:latest
+            pkg: rpm
+            family: fedora
+
+    steps:
+      - name: Install container bootstrap tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ matrix.family }}" == "debian" ]]; then
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update
+            apt-get install -y git ca-certificates curl
+          else
+            dnf install -y git ca-certificates curl
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ inputs.tag }}" ]]; then
+            REF="${{ inputs.tag }}"
+          else
+            REF="${GITHUB_REF_NAME}"
+          fi
+          # Strip leading v from tags like v0.1.0
+          VERSION="${REF#v}"
+          # Prefer Cargo.toml if tag is not a version tag (workflow_dispatch on branch)
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+ ]]; then
+            VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$REF" >> "$GITHUB_OUTPUT"
+          echo "Resolved version: $VERSION (ref: $REF)"
+
+      # ── Debian / Ubuntu deps ─────────────────────────────────────────────
+      - name: Install build deps (Debian family)
+        if: matrix.family == 'debian'
+        shell: bash
+        run: |
+          set -euo pipefail
+          export DEBIAN_FRONTEND=noninteractive
+          if command -v sudo >/dev/null 2>&1 && [[ "$(id -u)" -ne 0 ]]; then
+            SUDO=sudo
+          else
+            SUDO=
+          fi
+          $SUDO apt-get update
+          $SUDO apt-get install -y \
+            build-essential \
+            pkg-config \
+            curl \
+            ca-certificates \
+            git \
+            libgtk-4-dev \
+            libadwaita-1-dev \
+            dpkg-dev
+
+      # ── Fedora deps ──────────────────────────────────────────────────────
+      - name: Install build deps (Fedora)
+        if: matrix.family == 'fedora'
+        shell: bash
+        run: |
+          set -euo pipefail
+          dnf install -y \
+            gcc \
+            gcc-c++ \
+            make \
+            pkgconf-pkg-config \
+            curl \
+            ca-certificates \
+            git \
+            gtk4-devel \
+            libadwaita-devel \
+            rpm-build \
+            rpmdevtools
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.distro }}
+
+      - name: Build release binary
+        run: cargo build --release --locked
+
+      - name: Package tarball
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          DISTRO: ${{ matrix.distro }}
+          OUT_DIR: dist
+        run: |
+          chmod +x scripts/package-tarball.sh
+          scripts/package-tarball.sh
+
+      - name: Package .deb
+        if: matrix.pkg == 'deb'
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          DISTRO: ${{ matrix.distro }}
+          OUT_DIR: dist
+        run: |
+          chmod +x scripts/package-deb.sh
+          scripts/package-deb.sh
+
+      - name: Package .rpm
+        if: matrix.pkg == 'rpm'
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          DISTRO: ${{ matrix.distro }}
+          OUT_DIR: dist
+        run: |
+          chmod +x scripts/package-rpm.sh
+          scripts/package-rpm.sh
+
+      - name: List artifacts
+        run: find dist -maxdepth 1 -type f -ls
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: systemd-hub-${{ matrix.distro }}
+          path: |
+            dist/*.tar.gz
+            dist/*.deb
+            dist/*.rpm
+          if-no-files-found: error
+          retention-days: 14
+
+  # ── Portable AppImage (Ubuntu 24.04 userspace + bundled GTK) ──────────────
+  appimage:
+    name: Build AppImage
+    runs-on: ubuntu-24.04
+    container: ubuntu:24.04
+    steps:
+      - name: Install container bootstrap tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install -y git ca-certificates curl
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ inputs.tag }}" ]]; then
+            REF="${{ inputs.tag }}"
+          else
+            REF="${GITHUB_REF_NAME}"
+          fi
+          VERSION="${REF#v}"
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+ ]]; then
+            VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$REF" >> "$GITHUB_OUTPUT"
+          echo "Resolved version: $VERSION (ref: $REF)"
+
+      - name: Install build & AppImage dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install -y \
+            build-essential \
+            pkg-config \
+            curl \
+            ca-certificates \
+            git \
+            file \
+            patchelf \
+            desktop-file-utils \
+            wget \
+            libgtk-4-dev \
+            libadwaita-1-dev \
+            libgirepository1.0-dev \
+            gobject-introspection \
+            librsvg2-dev \
+            librsvg2-bin \
+            libgdk-pixbuf2.0-dev \
+            adwaita-icon-theme \
+            zsync
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: release-appimage
+
+      - name: Build release binary
+        run: cargo build --release --locked
+
+      - name: Package AppImage
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          OUT_DIR: dist
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+          DEPLOY_GTK_VERSION: "4"
+        run: |
+          chmod +x scripts/package-appimage.sh
+          scripts/package-appimage.sh
+
+      - name: List artifacts
+        run: find dist -maxdepth 1 -type f -ls
+
+      - name: Upload AppImage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: systemd-hub-appimage
+          path: dist/*.AppImage
+          if-no-files-found: error
+          retention-days: 14
+
+  # ── Publish GitHub Release ────────────────────────────────────────────────
+  release:
+    name: Publish GitHub Release
+    needs: [build, appimage]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ inputs.tag }}" ]]; then
+            REF="${{ inputs.tag }}"
+          else
+            REF="${GITHUB_REF_NAME}"
+          fi
+          VERSION="${REF#v}"
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+ ]]; then
+            VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
+            REF="v${VERSION}"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$REF" >> "$GITHUB_OUTPUT"
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Prepare release assets
+        shell: bash
+        working-directory: release-assets
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=(*.tar.gz *.deb *.rpm *.AppImage)
+          if ((${#files[@]} == 0)); then
+            echo "No release packages found" >&2
+            ls -laR .
+            exit 1
+          fi
+          ls -lah "${files[@]}"
+          sha256sum "${files[@]}" | tee SHA256SUMS
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: Systemd Hub ${{ steps.version.outputs.version }}
+          draft: false
+          prerelease: ${{ contains(steps.version.outputs.version, '-') || contains(steps.version.outputs.version, 'alpha') || contains(steps.version.outputs.version, 'beta') || contains(steps.version.outputs.version, 'rc') }}
+          generate_release_notes: true
+          body: |
+            ## Systemd Hub ${{ steps.version.outputs.version }}
+
+            Native Linux systemd service manager (GTK 4 + libadwaita).
+
+            ### Assets
+
+            | Artifact | Target |
+            |----------|--------|
+            | `*.AppImage` | Portable (most modern Linux desktops; GTK bundled) |
+            | `*-ubuntu-24.04-*.tar.gz` / `.deb` | Ubuntu 24.04 LTS and derivatives |
+            | `*-debian-trixie-*.tar.gz` / `.deb` | Debian Trixie / testing |
+            | `*-fedora-latest-*.tar.gz` / `.rpm` | Fedora (current) |
+
+            ### Runtime requirements
+
+            - Linux with systemd
+            - **AppImage:** GTK/libadwaita are bundled; still needs a desktop with FUSE or extract-and-run, and glibc recent enough (built on Ubuntu 24.04).
+            - **deb / rpm / tarball:** GTK **4.12+** and libadwaita **1.5+** on the host. Prefer the package matching your distribution.
+
+            ### Install examples
+
+            **AppImage (portable):**
+            ```bash
+            chmod +x systemd-hub-*-x86_64.AppImage
+            ./systemd-hub-*-x86_64.AppImage
+            ```
+
+            **Debian / Ubuntu (.deb):**
+            ```bash
+            sudo apt install ./systemd-hub_*_amd64.ubuntu-24.04.deb
+            ```
+
+            **Fedora (.rpm):**
+            ```bash
+            sudo dnf install ./systemd-hub-*.fedora-latest.x86_64.rpm
+            ```
+
+            **Tarball (user-local):**
+            ```bash
+            tar -xzf systemd-hub-*-ubuntu-24.04-x86_64.tar.gz
+            cd systemd-hub-*/
+            mkdir -p ~/.local/bin ~/.local/share/applications
+            cp bin/systemd-hub ~/.local/bin/
+            cp share/applications/*.desktop ~/.local/share/applications/
+            ```
+
+            Verify downloads with `SHA256SUMS`.
+          files: |
+            release-assets/*.tar.gz
+            release-assets/*.deb
+            release-assets/*.rpm
+            release-assets/*.AppImage
+            release-assets/SHA256SUMS
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
