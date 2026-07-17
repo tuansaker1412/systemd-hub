@@ -15,6 +15,9 @@ pub enum InspectorPage {
     Logs,
 }
 
+type PageHandlers = Rc<RefCell<Vec<Box<dyn Fn(InspectorPage)>>>>;
+type CollapseHandlers = Rc<RefCell<Vec<Box<dyn Fn()>>>>;
+
 /// Right-hand panel shown only when a service is selected.
 ///
 /// Contains a view switcher for Details vs Logs and a collapse control.
@@ -23,8 +26,8 @@ pub struct ServiceInspector {
     detail: ServiceDetailPage,
     logs: LogViewer,
     stack: adw::ViewStack,
-    page_handlers: Rc<RefCell<Vec<Box<dyn Fn(InspectorPage)>>>>,
-    collapse_handlers: Rc<RefCell<Vec<Box<dyn Fn()>>>>,
+    page_handlers: PageHandlers,
+    collapse_handlers: CollapseHandlers,
 }
 
 impl ServiceInspector {
@@ -61,9 +64,8 @@ impl ServiceInspector {
         toolbar.set_content(Some(&stack));
         toolbar.add_css_class("view");
 
-        let page_handlers: Rc<RefCell<Vec<Box<dyn Fn(InspectorPage)>>>> =
-            Rc::new(RefCell::new(Vec::new()));
-        let collapse_handlers: Rc<RefCell<Vec<Box<dyn Fn()>>>> = Rc::new(RefCell::new(Vec::new()));
+        let page_handlers: PageHandlers = Rc::new(RefCell::new(Vec::new()));
+        let collapse_handlers: CollapseHandlers = Rc::new(RefCell::new(Vec::new()));
 
         {
             let handlers = page_handlers.clone();
