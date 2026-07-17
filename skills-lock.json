@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "developing-gtk-apps": {
+      "source": "mhagrelius/dotfiles",
+      "sourceType": "github",
+      "skillPath": ".claude/skills/developing-gtk-apps/SKILL.md",
+      "computedHash": "b69aa2d24add96983f34f545d9c1355d3c383d8b2c434b9749436bbb10b223ae"
+    }
+  }
+}
