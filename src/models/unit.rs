@@ -131,6 +131,30 @@ impl ServiceAction {
             Self::Disable => "Disable",
         }
     }
+
+    /// Freedesktop symbolic icon name for toolbar/action buttons.
+    pub fn icon_name(self) -> &'static str {
+        match self {
+            Self::Start => "media-playback-start-symbolic",
+            Self::Stop => "media-playback-stop-symbolic",
+            Self::Restart => "system-reboot-symbolic",
+            Self::Reload => "view-refresh-symbolic",
+            Self::Enable => "list-add-symbolic",
+            Self::Disable => "list-remove-symbolic",
+        }
+    }
+
+    /// Short user-facing description for tooltips.
+    pub fn tooltip(self) -> &'static str {
+        match self {
+            Self::Start => "Start this service",
+            Self::Stop => "Stop this service",
+            Self::Restart => "Restart this service (stop, then start)",
+            Self::Reload => "Reload unit configuration without a full restart",
+            Self::Enable => "Enable this service to start at boot",
+            Self::Disable => "Disable this service from starting at boot",
+        }
+    }
 }
 
 #[cfg(test)]

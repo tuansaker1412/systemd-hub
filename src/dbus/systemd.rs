@@ -2,7 +2,8 @@
 
 use anyhow::{Context, Result};
 use zbus::proxy;
-use zbus::zvariant::OwnedObjectPath;
+use zbus::proxy::MethodFlags;
+use zbus::zvariant::{DynamicType, OwnedObjectPath};
 use zbus::Connection;
 
 use crate::models::{ServiceAction, UnitDetail, UnitSummary};
@@ -29,37 +30,19 @@ type ExecStartEntry = (String, Vec<String>, bool, u64, u64, u32, i32, i32);
     default_service = "org.freedesktop.systemd1",
     default_path = "/org/freedesktop/systemd1"
 )]
+/// Read-only Manager methods.
+///
+/// Lifecycle / enable / disable / daemon-reload **must not** be declared here.
+/// They go through [`SystemdClient::perform_action`] → [`call_interactive`] so
+/// Polkit can show an authentication dialog (`AllowInteractiveAuth`).
 trait Manager {
     async fn list_units(&self) -> zbus::Result<Vec<UnitTuple>>;
 
     async fn get_unit(&self, name: &str) -> zbus::Result<OwnedObjectPath>;
 
-    #[zbus(name = "StartUnit")]
-    async fn start_unit(&self, name: &str, mode: &str) -> zbus::Result<OwnedObjectPath>;
-
-    #[zbus(name = "StopUnit")]
-    async fn stop_unit(&self, name: &str, mode: &str) -> zbus::Result<OwnedObjectPath>;
-
-    #[zbus(name = "RestartUnit")]
-    async fn restart_unit(&self, name: &str, mode: &str) -> zbus::Result<OwnedObjectPath>;
-
-    #[zbus(name = "ReloadUnit")]
-    async fn reload_unit(&self, name: &str, mode: &str) -> zbus::Result<OwnedObjectPath>;
-
-    #[zbus(name = "EnableUnitFiles")]
-    async fn enable_unit_files(
-        &self,
-        files: &[&str],
-        runtime: bool,
-        force: bool,
-    ) -> zbus::Result<(bool, Vec<(String, String, String)>)>;
-
-    #[zbus(name = "DisableUnitFiles")]
-    async fn disable_unit_files(
-        &self,
-        files: &[&str],
-        runtime: bool,
-    ) -> zbus::Result<Vec<(String, String, String)>>;
+    /// Load a unit into memory (even if inactive/disabled) and return its object path.
+    #[zbus(name = "LoadUnit")]
+    async fn load_unit(&self, name: &str) -> zbus::Result<OwnedObjectPath>;
 
     #[zbus(name = "GetUnitFileState")]
     async fn get_unit_file_state(&self, file: &str) -> zbus::Result<String>;
@@ -67,8 +50,6 @@ trait Manager {
     /// Returns (unit_file_path, enable_state) pairs.
     #[zbus(name = "ListUnitFiles")]
     async fn list_unit_files(&self) -> zbus::Result<Vec<(String, String)>>;
-
-    async fn reload(&self) -> zbus::Result<()>;
 }
 
 #[proxy(
@@ -123,7 +104,11 @@ impl SystemdClient {
         Ok(Self { connection })
     }
 
-    /// List all loaded `.service` units with enable state when available.
+    /// List installed `.service` units (loaded + unit files).
+    ///
+    /// `ListUnits` only returns units currently in memory. A disabled inactive
+    /// service is often unloaded and would disappear from the UI after disable.
+    /// Merging with `ListUnitFiles` keeps those services visible (inactive/dead).
     pub async fn list_services(&self) -> Result<Vec<UnitSummary>> {
         let manager = ManagerProxy::new(&self.connection)
             .await
@@ -131,26 +116,45 @@ impl SystemdClient {
 
         let units = manager.list_units().await.context("ListUnits failed")?;
 
-        // One bulk call for enable states instead of N GetUnitFileState round-trips.
-        let enable_map = match manager.list_unit_files().await {
-            Ok(files) => files
-                .into_iter()
-                .filter_map(|(path, state)| {
-                    let name = path.rsplit('/').next()?.to_string();
-                    if name.ends_with(".service") {
-                        Some((name, state))
-                    } else {
-                        None
-                    }
-                })
-                .collect::<std::collections::HashMap<_, _>>(),
+        // path → enable state for every installed unit file.
+        let unit_files = match manager.list_unit_files().await {
+            Ok(files) => files,
             Err(e) => {
-                tracing::warn!(error = %e, "ListUnitFiles failed; enable states unknown");
-                std::collections::HashMap::new()
+                tracing::warn!(error = %e, "ListUnitFiles failed; showing loaded units only");
+                Vec::new()
             }
         };
 
-        let mut services = Vec::new();
+        let mut by_name: std::collections::HashMap<String, UnitSummary> =
+            std::collections::HashMap::new();
+
+        // 1) All installed .service unit files (includes disabled / not loaded).
+        for (path, enabled_state) in unit_files {
+            let Some(name) = path.rsplit('/').next().map(str::to_string) else {
+                continue;
+            };
+            if !name.ends_with(".service") {
+                continue;
+            }
+            // Template definitions (foo@.service), not concrete instances.
+            if name.ends_with("@.service") {
+                continue;
+            }
+            by_name.insert(
+                name.clone(),
+                UnitSummary {
+                    name,
+                    description: String::new(),
+                    load_state: "not-found".into(),
+                    active_state: "inactive".into(),
+                    sub_state: "dead".into(),
+                    unit_path: String::new(),
+                    enabled_state,
+                },
+            );
+        }
+
+        // 2) Overlay live state from loaded units (running, failed, recently used, …).
         for (name, description, load_state, active_state, sub_state, _following, unit_path, ..) in
             units
         {
@@ -158,36 +162,53 @@ impl SystemdClient {
                 continue;
             }
 
-            let enabled_state = enable_map
+            let enabled_state = by_name
                 .get(&name)
-                .cloned()
+                .map(|s| s.enabled_state.clone())
                 .unwrap_or_else(|| "unknown".into());
 
-            services.push(UnitSummary {
-                name,
-                description,
-                load_state,
-                active_state,
-                sub_state,
-                unit_path: unit_path.to_string(),
-                enabled_state,
-            });
+            by_name.insert(
+                name.clone(),
+                UnitSummary {
+                    name,
+                    description,
+                    load_state,
+                    active_state,
+                    sub_state,
+                    unit_path: unit_path.to_string(),
+                    enabled_state,
+                },
+            );
         }
 
+        // Prefer a clearer load_state label for unit-file-only rows.
+        for summary in by_name.values_mut() {
+            if summary.unit_path.is_empty() && summary.load_state == "not-found" {
+                summary.load_state = "unloaded".into();
+            }
+        }
+
+        let mut services: Vec<UnitSummary> = by_name.into_values().collect();
         services.sort_by_key(|a| a.name.to_lowercase());
         Ok(services)
     }
 
     /// Fetch detailed properties for a single unit.
+    ///
+    /// Uses `GetUnit` when loaded; otherwise `LoadUnit` so disabled/unloaded
+    /// services still open in the detail panel.
     pub async fn get_unit_detail(&self, name: &str) -> Result<UnitDetail> {
         let manager = ManagerProxy::new(&self.connection)
             .await
             .context("failed to create Manager proxy")?;
 
-        let path = manager
-            .get_unit(name)
-            .await
-            .with_context(|| format!("GetUnit({name}) failed"))?;
+        let path = match manager.get_unit(name).await {
+            Ok(path) => path,
+            Err(_) => manager
+                .load_unit(name)
+                .await
+                .with_context(|| format!("LoadUnit({name}) failed (unit not loaded)"))?,
+        };
 
         let unit = UnitProxy::builder(&self.connection)
             .path(&path)?
@@ -249,6 +270,23 @@ impl SystemdClient {
     }
 
     /// Perform a lifecycle or enable/disable action.
+    ///
+    /// # Polkit / interactive auth
+    ///
+    /// Every privileged systemd method below is invoked via [`call_interactive`]
+    /// (`AllowInteractiveAuth`) so the session Polkit agent can show a password
+    /// dialog when needed:
+    ///
+    /// | UI control              | `ServiceAction` | D-Bus method(s)                          |
+    /// |-------------------------|-----------------|------------------------------------------|
+    /// | Start button            | `Start`         | `StartUnit`                              |
+    /// | Stop button             | `Stop`          | `StopUnit`                               |
+    /// | Restart button          | `Restart`       | `RestartUnit`                            |
+    /// | Reload button           | `Reload`        | `ReloadUnit`                             |
+    /// | Enabled switch on       | `Enable`        | `EnableUnitFiles` + `Reload`             |
+    /// | Enabled switch off      | `Disable`       | `DisableUnitFiles` + `Reload`            |
+    ///
+    /// Read-only UI (list, detail, logs/journal) does not need this flag.
     pub async fn perform_action(&self, name: &str, action: ServiceAction) -> Result<()> {
         let manager = ManagerProxy::new(&self.connection)
             .await
@@ -258,46 +296,61 @@ impl SystemdClient {
 
         match action {
             ServiceAction::Start => {
-                manager
-                    .start_unit(name, MODE)
+                call_interactive::<OwnedObjectPath>(&manager, "StartUnit", &(name, MODE))
                     .await
                     .with_context(|| format!("StartUnit({name}) failed"))?;
             }
             ServiceAction::Stop => {
-                manager
-                    .stop_unit(name, MODE)
+                call_interactive::<OwnedObjectPath>(&manager, "StopUnit", &(name, MODE))
                     .await
                     .with_context(|| format!("StopUnit({name}) failed"))?;
             }
             ServiceAction::Restart => {
-                manager
-                    .restart_unit(name, MODE)
+                call_interactive::<OwnedObjectPath>(&manager, "RestartUnit", &(name, MODE))
                     .await
                     .with_context(|| format!("RestartUnit({name}) failed"))?;
             }
             ServiceAction::Reload => {
-                manager
-                    .reload_unit(name, MODE)
+                call_interactive::<OwnedObjectPath>(&manager, "ReloadUnit", &(name, MODE))
                     .await
                     .with_context(|| format!("ReloadUnit({name}) failed"))?;
             }
             ServiceAction::Enable => {
-                manager
-                    .enable_unit_files(&[name], false, true)
-                    .await
-                    .with_context(|| format!("EnableUnitFiles({name}) failed"))?;
-                manager
-                    .reload()
+                // Permanent enable (survives reboot). force=true replaces conflicting symlinks.
+                let files: &[&str] = &[name];
+                call_interactive::<(bool, Vec<(String, String, String)>)>(
+                    &manager,
+                    "EnableUnitFiles",
+                    &(files, false, true),
+                )
+                .await
+                .with_context(|| format!("EnableUnitFiles({name}) failed"))?;
+                // daemon-reload also requires auth on many systems.
+                call_interactive::<()>(&manager, "Reload", &())
                     .await
                     .context("daemon-reload after enable failed")?;
             }
             ServiceAction::Disable => {
-                manager
-                    .disable_unit_files(&[name], false)
+                // Runtime-enabled units live under /run and must be disabled with runtime=true.
+                let state = manager
+                    .get_unit_file_state(name)
                     .await
-                    .with_context(|| format!("DisableUnitFiles({name}) failed"))?;
-                manager
-                    .reload()
+                    .unwrap_or_default();
+                let runtime = matches!(
+                    state.as_str(),
+                    "enabled-runtime" | "linked-runtime" | "masked-runtime"
+                );
+                let files: &[&str] = &[name];
+                call_interactive::<Vec<(String, String, String)>>(
+                    &manager,
+                    "DisableUnitFiles",
+                    &(files, runtime),
+                )
+                .await
+                .with_context(|| {
+                    format!("DisableUnitFiles({name}, runtime={runtime}) failed")
+                })?;
+                call_interactive::<()>(&manager, "Reload", &())
                     .await
                     .context("daemon-reload after disable failed")?;
             }
@@ -305,4 +358,25 @@ impl SystemdClient {
 
         Ok(())
     }
+}
+
+/// Call a Manager method with interactive Polkit authorization allowed.
+///
+/// Without `AllowInteractiveAuth`, privileged calls fail immediately with
+/// `org.freedesktop.DBus.Error.InteractiveAuthorizationRequired` and no
+/// password dialog is shown.
+async fn call_interactive<R>(
+    manager: &ManagerProxy<'_>,
+    method: &str,
+    body: &(impl serde::Serialize + DynamicType),
+) -> Result<R>
+where
+    R: for<'d> zbus::zvariant::DynamicDeserialize<'d>,
+{
+    manager
+        .inner()
+        .call_with_flags::<_, _, R>(method, MethodFlags::AllowInteractiveAuth.into(), body)
+        .await
+        .with_context(|| format!("D-Bus {method} call failed"))?
+        .with_context(|| format!("D-Bus {method} returned no reply"))
 }

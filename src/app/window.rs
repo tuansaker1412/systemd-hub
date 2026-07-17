@@ -173,11 +173,21 @@ impl SystemdHubWindow {
         }
 
         if let Some(view) = imp.services_view.borrow().as_ref() {
+            // Selection = row highlight only. Does not open the detail panel.
             view.connect_selection_changed(clone!(
                 #[weak(rename_to = window)]
                 self,
                 move |unit| {
                     window.on_unit_selected(unit);
+                }
+            ));
+
+            // Click / Enter activates the row → open detail for that service.
+            view.connect_unit_activated(clone!(
+                #[weak(rename_to = window)]
+                self,
+                move |unit| {
+                    window.on_unit_activated(unit);
                 }
             ));
 
@@ -196,6 +206,44 @@ impl SystemdHubWindow {
                     window.on_inspector_page_changed(page);
                 }
             ));
+
+            view.detail().connect_enable_toggled(clone!(
+                #[weak(rename_to = window)]
+                self,
+                move |enabled| {
+                    let action = if enabled {
+                        ServiceAction::Enable
+                    } else {
+                        ServiceAction::Disable
+                    };
+                    window.perform_service_action(action);
+                }
+            ));
+
+            // Closing the inspector (button or hide gesture) drops highlight.
+            view.connect_collapse_clicked(clone!(
+                #[weak(rename_to = window)]
+                self,
+                move || {
+                    window.close_unit_detail();
+                }
+            ));
+            view.widget.connect_notify_local(
+                Some("show-sidebar"),
+                clone!(
+                    #[weak(rename_to = window)]
+                    self,
+                    move |split, _| {
+                        if !split.shows_sidebar() {
+                            // Gesture/button hid the panel — clear open unit + highlight.
+                            let still_open = window.imp().selected_unit.borrow().is_some();
+                            if still_open {
+                                window.close_unit_detail();
+                            }
+                        }
+                    }
+                ),
+            );
         }
     }
 
@@ -299,8 +347,24 @@ impl SystemdHubWindow {
                 match rx.recv().await {
                     Ok(Ok(units)) => {
                         let count = units.len();
-                        if let Some(view) = window.imp().services_view.borrow().as_ref() {
-                            view.set_units(units);
+                        let imp = window.imp();
+                        // Keep highlight on the unit that still has detail open.
+                        let preserve = {
+                            let open = imp.selected_unit.borrow().clone();
+                            let visible = imp
+                                .services_view
+                                .borrow()
+                                .as_ref()
+                                .map(|v| v.is_inspector_visible())
+                                .unwrap_or(false);
+                            if visible {
+                                open
+                            } else {
+                                None
+                            }
+                        };
+                        if let Some(view) = imp.services_view.borrow().as_ref() {
+                            view.set_units(units, preserve.as_deref());
                         }
                         tracing::info!(count, "loaded services");
                     }
@@ -319,27 +383,90 @@ impl SystemdHubWindow {
         ));
     }
 
+    /// List selection changed (highlight / unselect).
+    ///
+    /// Does **not** open the inspector. While detail is open, the open unit stays
+    /// highlighted — other highlight changes are snapped back unless the panel
+    /// is closed.
     fn on_unit_selected(&self, unit: Option<UnitSummary>) {
         let imp = self.imp();
+        let open_name = imp.selected_unit.borrow().clone();
+        let inspector_open = imp
+            .services_view
+            .borrow()
+            .as_ref()
+            .map(|v| v.is_inspector_visible())
+            .unwrap_or(false);
+
         match unit {
             None => {
-                *imp.selected_unit.borrow_mut() = None;
-                self.set_follow_mode(false);
-                if let Some(view) = imp.services_view.borrow().as_ref() {
-                    view.clear_selection_ui();
+                if inspector_open {
+                    // Selection was cleared (e.g. filter) while detail is open:
+                    // restore highlight on the open unit when possible.
+                    if let Some(name) = open_name {
+                        if let Some(view) = imp.services_view.borrow().as_ref() {
+                            if view.select_unit(&name) {
+                                return;
+                            }
+                        }
+                    }
+                    self.close_unit_detail();
+                } else {
+                    *imp.selected_unit.borrow_mut() = None;
                 }
             }
             Some(summary) => {
-                *imp.selected_unit.borrow_mut() = Some(summary.name.clone());
-                if let Some(view) = imp.services_view.borrow().as_ref() {
-                    // Always open Details first; logs load only when user opens Logs.
-                    view.open_details();
-                    view.detail().set_loading_name(&summary.name);
-                    view.logs().clear();
+                if inspector_open {
+                    if let Some(open) = open_name.as_deref() {
+                        if summary.name != open {
+                            // Keep highlight locked to the unit shown in detail.
+                            // Switching detail only happens via click activate.
+                            if let Some(view) = imp.services_view.borrow().as_ref() {
+                                let _ = view.select_unit(open);
+                            }
+                            return;
+                        }
+                    }
+                    return;
                 }
-                self.set_follow_mode(false);
-                self.load_unit_detail(summary.name);
+                // Panel closed: track highlight only until activate opens detail.
+                *imp.selected_unit.borrow_mut() = Some(summary.name);
             }
+        }
+    }
+
+    /// Explicit row activate (single-click / Enter): open inspector + load detail.
+    fn on_unit_activated(&self, unit: UnitSummary) {
+        let imp = self.imp();
+        let name = unit.name;
+        *imp.selected_unit.borrow_mut() = Some(name.clone());
+
+        if let Some(view) = imp.services_view.borrow().as_ref() {
+            view.open_details(&name);
+            view.detail().set_loading_name(&name);
+            view.logs().clear();
+        }
+        self.set_follow_mode(false);
+        self.load_unit_detail(name);
+    }
+
+    /// Close detail panel and clear list highlight.
+    fn close_unit_detail(&self) {
+        let imp = self.imp();
+        if imp.selected_unit.borrow().is_none()
+            && !imp
+                .services_view
+                .borrow()
+                .as_ref()
+                .map(|v| v.is_inspector_visible())
+                .unwrap_or(false)
+        {
+            return;
+        }
+        *imp.selected_unit.borrow_mut() = None;
+        self.set_follow_mode(false);
+        if let Some(view) = imp.services_view.borrow().as_ref() {
+            view.clear_selection_ui();
         }
     }
 
@@ -444,13 +571,16 @@ impl SystemdHubWindow {
                         );
                     }
                     Ok(Err(e)) => {
+                        // {:#} includes the full anyhow cause chain (e.g. Polkit errors).
                         tracing::error!(
-                            error = %e,
+                            error = %format!("{e:#}"),
                             unit = %name,
                             action = action.as_str(),
                             "action failed"
                         );
-                        window.toast(&format!("{} failed: {e}", action.label()));
+                        window.toast(&format!("{} failed: {e:#}", action.label()));
+                        // Resync detail UI (e.g. Enabled switch) after a failed action.
+                        window.load_unit_detail(name.clone());
                     }
                     Err(_) => {}
                 }

@@ -7,7 +7,7 @@ use gtk4::{
     SearchEntry, SignalListItemFactory, SingleSelection, SortListModel,
 };
 use libadwaita as adw;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use crate::models::{StateTone, UnitSummary};
@@ -60,8 +60,11 @@ pub struct ServiceListPage {
     pub widget: adw::ToolbarView,
     store: gio::ListStore,
     selection: SingleSelection,
+    column_view: ColumnView,
     filter: CustomFilter,
     status_label: Label,
+    /// When true, selection signals are ignored (list rebuild / programmatic select).
+    suppress_selection: Rc<Cell<bool>>,
 }
 
 impl ServiceListPage {
@@ -113,6 +116,10 @@ impl ServiceListPage {
             .reorderable(false)
             .show_row_separators(true)
             .show_column_separators(false)
+            // Click activates the row (opens detail). Hover only prelights — it does
+            // not select or open the inspector (see window on_unit_activated).
+            .single_click_activate(true)
+            .enable_rubberband(false)
             .hexpand(true)
             .vexpand(true)
             .build();
@@ -223,8 +230,10 @@ impl ServiceListPage {
             widget: toolbar,
             store,
             selection,
+            column_view,
             filter,
             status_label,
+            suppress_selection: Rc::new(Cell::new(false)),
         }
     }
 
@@ -394,7 +403,12 @@ impl ServiceListPage {
             .build()
     }
 
-    pub fn set_units(&self, units: Vec<UnitSummary>) {
+    /// Replace the list contents.
+    ///
+    /// When `select_name` is set, that unit is re-selected after rebuild so the
+    /// highlight stays on the service whose detail panel is open.
+    pub fn set_units(&self, units: Vec<UnitSummary>, select_name: Option<&str>) {
+        self.suppress_selection.set(true);
         self.store.remove_all();
         let count = units.len();
         for unit in units {
@@ -405,16 +419,58 @@ impl ServiceListPage {
             if count == 1 { "" } else { "s" }
         ));
         self.filter.changed(FilterChange::Different);
+
+        if let Some(name) = select_name {
+            let _ = self.select_by_name(name);
+        } else {
+            self.selection.set_selected(gtk::INVALID_LIST_POSITION);
+        }
+        self.suppress_selection.set(false);
     }
 
     pub fn set_status(&self, text: &str) {
         self.status_label.set_label(text);
     }
 
+    /// Select (highlight) the row with the given unit name. Returns whether found.
+    pub fn select_by_name(&self, name: &str) -> bool {
+        let n = self.selection.n_items();
+        for i in 0..n {
+            let matches = self
+                .selection
+                .item(i)
+                .and_then(|o| o.downcast::<UnitObject>().ok())
+                .is_some_and(|u| u.name() == name);
+            if matches {
+                if self.selection.selected() != i {
+                    self.suppress_selection.set(true);
+                    self.selection.set_selected(i);
+                    self.suppress_selection.set(false);
+                }
+                self.column_view
+                    .scroll_to(i, None, gtk::ListScrollFlags::NONE, None);
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Clear the list highlight without treating it as a user unselect when suppressed.
+    pub fn unselect(&self) {
+        self.suppress_selection.set(true);
+        self.selection.set_selected(gtk::INVALID_LIST_POSITION);
+        self.suppress_selection.set(false);
+    }
+
     pub fn connect_selection_changed<F: Fn(Option<UnitSummary>) + 'static>(&self, f: F) {
         let f = Rc::new(f);
+        let suppress = self.suppress_selection.clone();
         let f_sel = f.clone();
+        let suppress_sel = suppress.clone();
         self.selection.connect_selection_changed(move |sel, _, _| {
+            if suppress_sel.get() {
+                return;
+            }
             let unit = sel
                 .selected_item()
                 .and_then(|o| o.downcast::<UnitObject>().ok())
@@ -423,12 +479,32 @@ impl ServiceListPage {
         });
         self.selection
             .connect_notify_local(Some("selected-item"), move |sel, _| {
+                if suppress.get() {
+                    return;
+                }
                 let unit = sel
                     .selected_item()
                     .and_then(|o| o.downcast::<UnitObject>().ok())
                     .map(|u| u.summary());
                 f(unit);
             });
+    }
+
+    /// Fired when a row is activated (single-click with `single_click_activate`).
+    ///
+    /// Useful when the same row is clicked again: selection does not change, but
+    /// the caller may still want to re-open a collapsed detail panel.
+    pub fn connect_unit_activated<F: Fn(UnitSummary) + 'static>(&self, f: F) {
+        let selection = self.selection.clone();
+        self.column_view.connect_activate(move |_, position| {
+            let unit = selection
+                .item(position)
+                .and_then(|o| o.downcast::<UnitObject>().ok())
+                .map(|u| u.summary());
+            if let Some(unit) = unit {
+                f(unit);
+            }
+        });
     }
 
     pub fn selected_unit(&self) -> Option<UnitSummary> {
