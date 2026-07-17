@@ -2,16 +2,59 @@
 
 use gtk4::prelude::*;
 use gtk4::{
-    self as gtk, gio, ColumnView, ColumnViewColumn, CustomFilter, CustomSorter, FilterChange,
-    FilterListModel, Label, MultiSorter, Orientation, ScrolledWindow, SearchEntry,
-    SignalListItemFactory, SingleSelection, SortListModel,
+    self as gtk, gio, Align, CheckButton, ColumnView, ColumnViewColumn, CustomFilter, CustomSorter,
+    FilterChange, FilterListModel, Image, Label, MultiSorter, Orientation, ScrolledWindow,
+    SearchEntry, SignalListItemFactory, SingleSelection, SortListModel,
 };
 use libadwaita as adw;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use crate::models::UnitSummary;
+use crate::models::{StateTone, UnitSummary};
 use crate::ui::UnitObject;
+
+/// Adwaita semantic CSS classes used for state labels/icons.
+const TONE_CLASSES: &[&str] = &["success", "warning", "error", "dimmed"];
+
+fn tone_css_class(tone: StateTone) -> Option<&'static str> {
+    match tone {
+        StateTone::Success => Some("success"),
+        StateTone::Warning => Some("warning"),
+        StateTone::Error => Some("error"),
+        StateTone::Muted => Some("dimmed"),
+        StateTone::Normal => None,
+    }
+}
+
+fn apply_tone(widget: &impl WidgetExt, tone: StateTone) {
+    for class in TONE_CLASSES {
+        widget.remove_css_class(class);
+    }
+    if let Some(class) = tone_css_class(tone) {
+        widget.add_css_class(class);
+    }
+}
+
+/// Symbolic icon for a systemd ActiveState value.
+fn active_state_icon(active_state: &str) -> &'static str {
+    match active_state {
+        "active" => "emblem-ok-symbolic",
+        // Red "X" — tone forced to Error in active_icon_column.
+        "inactive" => "window-close-symbolic",
+        "failed" => "dialog-error-symbolic",
+        "activating" | "deactivating" | "reloading" => "content-loading-symbolic",
+        _ => "dialog-question-symbolic",
+    }
+}
+
+/// Icon color for ActiveState; inactive uses red X, not the muted tone.
+fn active_state_icon_tone(summary: &UnitSummary) -> StateTone {
+    if summary.active_state == "inactive" {
+        StateTone::Error
+    } else {
+        summary.active_state_tone()
+    }
+}
 
 pub struct ServiceListPage {
     pub widget: adw::ToolbarView,
@@ -39,6 +82,8 @@ impl ServiceListPage {
             unit.name().to_lowercase().contains(&q)
                 || unit.description().to_lowercase().contains(&q)
                 || unit.active_state().to_lowercase().contains(&q)
+                || unit.sub_state().to_lowercase().contains(&q)
+                || unit.enabled_state().to_lowercase().contains(&q)
         });
 
         let filter_model = FilterListModel::new(Some(store.clone()), Some(filter.clone()));
@@ -71,6 +116,7 @@ impl ServiceListPage {
             220,
             true,
             |u| u.name(),
+            |_| StateTone::Normal,
             |a, b| {
                 a.name()
                     .to_lowercase()
@@ -80,9 +126,10 @@ impl ServiceListPage {
         ));
         column_view.append_column(&Self::text_column(
             "Description",
-            280,
+            260,
             true,
             |u| u.description(),
+            |_| StateTone::Normal,
             |a, b| {
                 a.description()
                     .to_lowercase()
@@ -90,33 +137,24 @@ impl ServiceListPage {
                     .into()
             },
         ));
+        column_view.append_column(&Self::active_icon_column());
         column_view.append_column(&Self::text_column(
             "Status",
-            140,
-            true,
-            |u| u.status_label(),
-            |a, b| a.active_state().cmp(&b.active_state()).into(),
+            110,
+            false,
+            |u| u.sub_state(),
+            |u| u.summary().sub_state_tone(),
+            |a, b| a.sub_state().cmp(&b.sub_state()).into(),
         ));
         column_view.append_column(&Self::text_column(
             "Enabled",
             100,
-            true,
+            false,
             |u| u.enabled_state(),
+            |u| u.summary().enabled_state_tone(),
             |a, b| a.enabled_state().cmp(&b.enabled_state()).into(),
         ));
-        column_view.append_column(&Self::text_column(
-            "Running",
-            90,
-            false,
-            |u| {
-                if u.active_state() == "active" {
-                    "yes".into()
-                } else {
-                    "no".into()
-                }
-            },
-            |a, b| a.active_state().cmp(&b.active_state()).into(),
-        ));
+        column_view.append_column(&Self::running_checkbox_column());
 
         let scrolled = ScrolledWindow::builder()
             .child(&column_view)
@@ -191,6 +229,7 @@ impl ServiceListPage {
         width: i32,
         expand: bool,
         get: impl Fn(&UnitObject) -> String + 'static,
+        tone: impl Fn(&UnitObject) -> StateTone + 'static,
         sort: impl Fn(&UnitObject, &UnitObject) -> gtk::Ordering + 'static,
     ) -> ColumnViewColumn {
         let factory = SignalListItemFactory::new();
@@ -205,7 +244,9 @@ impl ServiceListPage {
         });
 
         let get = Rc::new(get);
+        let tone = Rc::new(tone);
         let get_bind = get.clone();
+        let tone_bind = tone.clone();
         factory.connect_bind(move |_, item| {
             let list_item = item.downcast_ref::<gtk::ListItem>().expect("ListItem");
             let Some(obj) = list_item.item() else { return };
@@ -213,6 +254,7 @@ impl ServiceListPage {
             let Some(child) = list_item.child() else { return };
             if let Ok(label) = child.downcast::<Label>() {
                 label.set_label(&get_bind(unit));
+                apply_tone(&label, tone_bind(unit));
             }
         });
 
@@ -230,6 +272,107 @@ impl ServiceListPage {
             .factory(&factory)
             .expand(expand)
             .fixed_width(width)
+            .sorter(&sorter)
+            .resizable(true)
+            .build()
+    }
+
+    /// ActiveState as a colored symbolic icon (tooltip keeps the text value).
+    fn active_icon_column() -> ColumnViewColumn {
+        let factory = SignalListItemFactory::new();
+        factory.connect_setup(move |_, item| {
+            let image = Image::builder()
+                .icon_name("dialog-question-symbolic")
+                .pixel_size(16)
+                .halign(Align::Start)
+                .valign(Align::Center)
+                .build();
+            item.downcast_ref::<gtk::ListItem>()
+                .expect("ListItem")
+                .set_child(Some(&image));
+        });
+
+        factory.connect_bind(move |_, item| {
+            let list_item = item.downcast_ref::<gtk::ListItem>().expect("ListItem");
+            let Some(obj) = list_item.item() else { return };
+            let Some(unit) = obj.downcast_ref::<UnitObject>() else { return };
+            let Some(child) = list_item.child() else { return };
+            let Ok(image) = child.downcast::<Image>() else { return };
+
+            let summary = unit.summary();
+            image.set_icon_name(Some(active_state_icon(&summary.active_state)));
+            image.set_tooltip_text(Some(&summary.active_state));
+            apply_tone(&image, active_state_icon_tone(&summary));
+        });
+
+        let sorter = CustomSorter::new(|a, b| {
+            let a = a.downcast_ref::<UnitObject>().map(|u| u.active_state());
+            let b = b.downcast_ref::<UnitObject>().map(|u| u.active_state());
+            match (a, b) {
+                (Some(a), Some(b)) => a.cmp(&b).into(),
+                _ => gtk::Ordering::Equal,
+            }
+        });
+
+        ColumnViewColumn::builder()
+            .title("Active")
+            .factory(&factory)
+            .expand(false)
+            .fixed_width(72)
+            .sorter(&sorter)
+            .resizable(true)
+            .build()
+    }
+
+    /// Running indicator as a non-interactive checkbox.
+    fn running_checkbox_column() -> ColumnViewColumn {
+        let factory = SignalListItemFactory::new();
+        factory.connect_setup(move |_, item| {
+            let check = CheckButton::builder()
+                .halign(Align::Start)
+                .valign(Align::Center)
+                .can_focus(false)
+                .can_target(false)
+                .build();
+            // Display-only: still looks like a normal checkbox, but does not receive input.
+            item.downcast_ref::<gtk::ListItem>()
+                .expect("ListItem")
+                .set_child(Some(&check));
+        });
+
+        factory.connect_bind(move |_, item| {
+            let list_item = item.downcast_ref::<gtk::ListItem>().expect("ListItem");
+            let Some(obj) = list_item.item() else { return };
+            let Some(unit) = obj.downcast_ref::<UnitObject>() else { return };
+            let Some(child) = list_item.child() else { return };
+            let Ok(check) = child.downcast::<CheckButton>() else { return };
+
+            let running = unit.active_state() == "active";
+            check.set_active(running);
+            check.set_tooltip_text(Some(if running {
+                "Running"
+            } else {
+                "Not running"
+            }));
+        });
+
+        let sorter = CustomSorter::new(|a, b| {
+            let a_run = a
+                .downcast_ref::<UnitObject>()
+                .map(|u| u.active_state() == "active")
+                .unwrap_or(false);
+            let b_run = b
+                .downcast_ref::<UnitObject>()
+                .map(|u| u.active_state() == "active")
+                .unwrap_or(false);
+            a_run.cmp(&b_run).into()
+        });
+
+        ColumnViewColumn::builder()
+            .title("Running")
+            .factory(&factory)
+            .expand(false)
+            .fixed_width(80)
             .sorter(&sorter)
             .resizable(true)
             .build()

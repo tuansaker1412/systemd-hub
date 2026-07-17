@@ -184,6 +184,12 @@ impl LogViewer {
         self.follow_toggle.is_active()
     }
 
+    pub fn set_follow_enabled(&self, enabled: bool) {
+        if self.follow_toggle.is_active() != enabled {
+            self.follow_toggle.set_active(enabled);
+        }
+    }
+
     pub fn connect_follow_toggled<F: Fn(bool) + 'static>(&self, f: F) {
         self.follow_toggle.connect_toggled(move |btn| {
             f(btn.is_active());

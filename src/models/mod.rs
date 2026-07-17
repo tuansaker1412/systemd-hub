@@ -4,4 +4,4 @@ mod system_info;
 mod unit;
 
 pub use system_info::SystemInfo;
-pub use unit::{ServiceAction, UnitDetail, UnitSummary};
+pub use unit::{ServiceAction, StateTone, UnitDetail, UnitSummary};

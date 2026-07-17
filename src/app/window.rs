@@ -1,9 +1,9 @@
-//! Main application window: sidebar | content | detail+logs.
+//! Main application window: sidebar navigation + content pages.
 
 use glib::{clone, ControlFlow, SourceId};
 use gtk4::prelude::*;
 use gtk4::subclass::prelude::*;
-use gtk4::{self as gtk, gio, glib, Orientation};
+use gtk4::{self as gtk, gio, glib};
 use libadwaita as adw;
 use libadwaita::prelude::*;
 use std::cell::{Cell, RefCell};
@@ -11,9 +11,7 @@ use std::time::Duration;
 
 use crate::models::{ServiceAction, UnitSummary};
 use crate::services::{JournalService, SystemInfoService, UnitService};
-use crate::ui::{
-    DashboardPage, LogViewer, ServiceDetailPage, ServiceListPage, Sidebar, SidebarPage,
-};
+use crate::ui::{DashboardPage, InspectorPage, ServicesView, Sidebar, SidebarPage};
 use crate::RUNTIME;
 
 const FOLLOW_INTERVAL_MS: u64 = 2_000;
@@ -45,9 +43,7 @@ mod imp {
         pub toast_overlay: RefCell<Option<adw::ToastOverlay>>,
         pub content_stack: RefCell<Option<gtk::Stack>>,
         pub dashboard: RefCell<Option<DashboardPage>>,
-        pub service_list: RefCell<Option<ServiceListPage>>,
-        pub service_detail: RefCell<Option<ServiceDetailPage>>,
-        pub log_viewer: RefCell<Option<LogViewer>>,
+        pub services_view: RefCell<Option<ServicesView>>,
         pub unit_service: RefCell<Option<UnitService>>,
         pub selected_unit: RefCell<Option<String>>,
         pub follow_source: RefCell<Option<SourceId>>,
@@ -91,38 +87,17 @@ impl SystemdHubWindow {
             return;
         }
 
-        let unit_service = UnitService::new();
-        *imp.unit_service.borrow_mut() = Some(unit_service);
+        *imp.unit_service.borrow_mut() = Some(UnitService::new());
 
         let sidebar = Sidebar::new();
         let dashboard = DashboardPage::new();
-        let service_list = ServiceListPage::new();
-        let service_detail = ServiceDetailPage::new();
-        let log_viewer = LogViewer::new();
-
-        // Right pane: detail on top, logs below.
-        let right_pane = gtk::Paned::new(Orientation::Vertical);
-        right_pane.set_wide_handle(true);
-        right_pane.set_resize_start_child(true);
-        right_pane.set_resize_end_child(true);
-        right_pane.set_start_child(Some(&service_detail.widget));
-        right_pane.set_end_child(Some(&log_viewer.widget));
-        right_pane.set_position(320);
-
-        // Center: service list | detail+logs
-        let services_paned = gtk::Paned::new(Orientation::Horizontal);
-        services_paned.set_wide_handle(true);
-        services_paned.set_resize_start_child(true);
-        services_paned.set_resize_end_child(true);
-        services_paned.set_start_child(Some(&service_list.widget));
-        services_paned.set_end_child(Some(&right_pane));
-        services_paned.set_position(560);
+        let services_view = ServicesView::new();
 
         let content_stack = gtk::Stack::new();
         content_stack.set_hexpand(true);
         content_stack.set_vexpand(true);
         content_stack.add_named(&dashboard.widget, Some("dashboard"));
-        content_stack.add_named(&services_paned, Some("services"));
+        content_stack.add_named(&services_view.widget, Some("services"));
         content_stack.set_visible_child_name("dashboard");
 
         let sidebar_page = adw::NavigationPage::builder()
@@ -149,9 +124,7 @@ impl SystemdHubWindow {
         *imp.toast_overlay.borrow_mut() = Some(toast_overlay);
         *imp.content_stack.borrow_mut() = Some(content_stack);
         *imp.dashboard.borrow_mut() = Some(dashboard);
-        *imp.service_list.borrow_mut() = Some(service_list);
-        *imp.service_detail.borrow_mut() = Some(service_detail);
-        *imp.log_viewer.borrow_mut() = Some(log_viewer);
+        *imp.services_view.borrow_mut() = Some(services_view);
 
         sidebar.connect_page_selected(clone!(
             #[weak(rename_to = window)]
@@ -173,22 +146,28 @@ impl SystemdHubWindow {
             }
         ));
 
-        if let Some(list) = imp.service_list.borrow().as_ref() {
-            list.connect_selection_changed(clone!(
+        if let Some(view) = imp.services_view.borrow().as_ref() {
+            view.connect_selection_changed(clone!(
                 #[weak(rename_to = window)]
                 self,
                 move |unit| {
                     window.on_unit_selected(unit);
                 }
             ));
-        }
 
-        if let Some(logs) = imp.log_viewer.borrow().as_ref() {
-            logs.connect_follow_toggled(clone!(
+            view.connect_follow_toggled(clone!(
                 #[weak(rename_to = window)]
                 self,
                 move |enabled| {
                     window.set_follow_mode(enabled);
+                }
+            ));
+
+            view.connect_inspector_page_changed(clone!(
+                #[weak(rename_to = window)]
+                self,
+                move |page| {
+                    window.on_inspector_page_changed(page);
                 }
             ));
         }
@@ -271,8 +250,8 @@ impl SystemdHubWindow {
 
     fn refresh_services(&self) {
         let imp = self.imp();
-        if let Some(list) = imp.service_list.borrow().as_ref() {
-            list.set_status("Loading services…");
+        if let Some(view) = imp.services_view.borrow().as_ref() {
+            view.set_status("Loading services…");
         }
 
         let Some(service) = imp.unit_service.borrow().clone() else {
@@ -292,15 +271,15 @@ impl SystemdHubWindow {
                 match rx.recv().await {
                     Ok(Ok(units)) => {
                         let count = units.len();
-                        if let Some(list) = window.imp().service_list.borrow().as_ref() {
-                            list.set_units(units);
+                        if let Some(view) = window.imp().services_view.borrow().as_ref() {
+                            view.set_units(units);
                         }
                         tracing::info!(count, "loaded services");
                     }
                     Ok(Err(e)) => {
                         tracing::error!(error = %e, "failed to list services");
-                        if let Some(list) = window.imp().service_list.borrow().as_ref() {
-                            list.set_status(&format!("Error: {e}"));
+                        if let Some(view) = window.imp().services_view.borrow().as_ref() {
+                            view.set_status(&format!("Error: {e}"));
                         }
                         window.toast(&format!("Failed to list services: {e}"));
                     }
@@ -317,19 +296,35 @@ impl SystemdHubWindow {
         match unit {
             None => {
                 *imp.selected_unit.borrow_mut() = None;
-                if let Some(detail) = imp.service_detail.borrow().as_ref() {
-                    detail.clear();
-                }
-                if let Some(logs) = imp.log_viewer.borrow().as_ref() {
-                    logs.clear();
+                self.set_follow_mode(false);
+                if let Some(view) = imp.services_view.borrow().as_ref() {
+                    view.clear_selection_ui();
                 }
             }
             Some(summary) => {
                 *imp.selected_unit.borrow_mut() = Some(summary.name.clone());
-                if let Some(detail) = imp.service_detail.borrow().as_ref() {
-                    detail.set_loading_name(&summary.name);
+                if let Some(view) = imp.services_view.borrow().as_ref() {
+                    // Always open Details first; logs load only when user opens Logs.
+                    view.open_details();
+                    view.detail().set_loading_name(&summary.name);
+                    view.logs().clear();
                 }
-                self.load_unit_detail(summary.name.clone());
+                self.set_follow_mode(false);
+                self.load_unit_detail(summary.name);
+            }
+        }
+    }
+
+    fn on_inspector_page_changed(&self, page: InspectorPage) {
+        match page {
+            InspectorPage::Details => {
+                // Stop auto-follow when leaving logs.
+                if let Some(view) = self.imp().services_view.borrow().as_ref() {
+                    view.logs().set_follow_enabled(false);
+                }
+                self.set_follow_mode(false);
+            }
+            InspectorPage::Logs => {
                 self.refresh_logs();
             }
         }
@@ -358,8 +353,8 @@ impl SystemdHubWindow {
                         if current.as_deref() != Some(detail.name.as_str()) {
                             return;
                         }
-                        if let Some(page) = window.imp().service_detail.borrow().as_ref() {
-                            page.set_detail(&detail);
+                        if let Some(view) = window.imp().services_view.borrow().as_ref() {
+                            view.detail().set_detail(&detail);
                         }
                     }
                     Ok(Err(e)) => {
@@ -406,7 +401,16 @@ impl SystemdHubWindow {
                                 move || {
                                     window.load_unit_detail(name.clone());
                                     window.refresh_services();
-                                    window.refresh_logs();
+                                    let logs_open = window
+                                        .imp()
+                                        .services_view
+                                        .borrow()
+                                        .as_ref()
+                                        .map(|v| v.is_logs_visible())
+                                        .unwrap_or(false);
+                                    if logs_open {
+                                        window.refresh_logs();
+                                    }
                                 }
                             ),
                         );
@@ -429,14 +433,25 @@ impl SystemdHubWindow {
     fn refresh_logs(&self) {
         let imp = self.imp();
         let Some(name) = imp.selected_unit.borrow().clone() else {
-            if let Some(logs) = imp.log_viewer.borrow().as_ref() {
-                logs.clear();
+            if let Some(view) = imp.services_view.borrow().as_ref() {
+                view.logs().clear();
             }
             return;
         };
 
-        if let Some(logs) = imp.log_viewer.borrow().as_ref() {
-            logs.set_status("Loading logs…");
+        // Only fetch when the Logs tab is actually visible.
+        let logs_visible = imp
+            .services_view
+            .borrow()
+            .as_ref()
+            .map(|v| v.is_logs_visible())
+            .unwrap_or(false);
+        if !logs_visible {
+            return;
+        }
+
+        if let Some(view) = imp.services_view.borrow().as_ref() {
+            view.logs().set_status("Loading logs…");
         }
 
         let (tx, rx) = async_channel::bounded(1);
@@ -456,14 +471,17 @@ impl SystemdHubWindow {
                         if current.as_deref() != Some(name.as_str()) {
                             return;
                         }
-                        if let Some(logs) = window.imp().log_viewer.borrow().as_ref() {
-                            logs.set_entries(entries);
+                        if let Some(view) = window.imp().services_view.borrow().as_ref() {
+                            if !view.is_logs_visible() {
+                                return;
+                            }
+                            view.logs().set_entries(entries);
                         }
                     }
                     Ok(Err(e)) => {
                         tracing::error!(error = %e, unit = %name, "failed to load logs");
-                        if let Some(logs) = window.imp().log_viewer.borrow().as_ref() {
-                            logs.set_status(&format!("Error: {e}"));
+                        if let Some(view) = window.imp().services_view.borrow().as_ref() {
+                            view.logs().set_status(&format!("Error: {e}"));
                         }
                     }
                     Err(_) => {}
@@ -491,10 +509,10 @@ impl SystemdHubWindow {
                 move || {
                     let still = window
                         .imp()
-                        .log_viewer
+                        .services_view
                         .borrow()
                         .as_ref()
-                        .map(|l| l.is_follow_enabled())
+                        .map(|v| v.is_logs_visible() && v.logs().is_follow_enabled())
                         .unwrap_or(false);
                     if still {
                         window.refresh_logs();

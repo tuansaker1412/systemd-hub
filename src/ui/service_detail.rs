@@ -35,7 +35,7 @@ impl ServiceDetailPage {
         let empty = adw::StatusPage::builder()
             .icon_name("application-x-executable-symbolic")
             .title("No service selected")
-            .description("Select a service from the list to view details and logs.")
+            .description("Select a service from the list to view its details.")
             .build();
 
         let content = gtk::Box::new(Orientation::Vertical, 12);
