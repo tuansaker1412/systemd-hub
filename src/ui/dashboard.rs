@@ -1,11 +1,15 @@
 //! Dashboard page: hostname, OS, kernel, uptime.
 
+use gtk4::gdk;
 use gtk4::prelude::*;
-use gtk4::{self as gtk, Align, Label, Orientation, ScrolledWindow};
+use gtk4::{self as gtk, Align, Image, Label, Orientation, ScrolledWindow};
 use libadwaita as adw;
 use libadwaita::prelude::*;
 
 use crate::models::SystemInfo;
+
+/// Embedded app logo shown above the system overview section.
+const LOGO_JPEG: &[u8] = include_bytes!("../../data/icons/systemd-hub-logo.jpg");
 
 pub struct DashboardPage {
     pub widget: adw::ToolbarView,
@@ -30,6 +34,8 @@ impl DashboardPage {
         content.set_margin_end(24);
         content.set_halign(Align::Fill);
         content.set_valign(Align::Start);
+
+        content.append(&Self::logo_header());
 
         let title = Label::builder()
             .label("System Overview")
@@ -80,6 +86,56 @@ impl DashboardPage {
             uptime,
             status,
         }
+    }
+
+    /// Logo + app name, centered above "System Overview".
+    fn logo_header() -> gtk::Box {
+        let column = gtk::Box::new(Orientation::Vertical, 12);
+        column.set_halign(Align::Center);
+        column.set_valign(Align::Center);
+        column.set_hexpand(true);
+
+        let logo = Self::logo_image();
+        column.append(&logo);
+
+        let app_name = Label::builder()
+            .label("Systemd Hub")
+            .css_classes(["title-2"])
+            .halign(Align::Center)
+            .justify(gtk::Justification::Center)
+            .build();
+        let tagline = Label::builder()
+            .label("Native systemd service manager")
+            .css_classes(["dimmed"])
+            .halign(Align::Center)
+            .justify(gtk::Justification::Center)
+            .build();
+
+        column.append(&app_name);
+        column.append(&tagline);
+
+        column
+    }
+
+    fn logo_image() -> Image {
+        let image = Image::builder()
+            .pixel_size(96)
+            .halign(Align::Center)
+            .valign(Align::Center)
+            .build();
+
+        match gdk::Texture::from_bytes(&glib::Bytes::from_static(LOGO_JPEG)) {
+            Ok(texture) => {
+                image.set_paintable(Some(&texture));
+            }
+            Err(err) => {
+                tracing::warn!("failed to load dashboard logo: {err}");
+                // Fallback to the existing symbolic-friendly app icon asset name if available.
+                image.set_icon_name(Some("application-x-executable"));
+            }
+        }
+
+        image
     }
 
     fn value_label(text: &str) -> Label {
