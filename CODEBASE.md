@@ -106,6 +106,7 @@ Các model nên giữ logic domain nhỏ, ví dụ `status_label()` hoặc `is_r
 
 - Dashboard hệ thống.
 - Danh sách `.service` unit.
+- Phân loại service (filter chips): Applications (mặc định), System, Custom, User, Generated, All.
 - Chi tiết service.
 - Start, Stop, Restart, Reload, Enable, Disable qua D-Bus.
 - Log viewer qua `journalctl`.
@@ -113,6 +114,20 @@ Các model nên giữ logic domain nhỏ, ví dụ `status_label()` hoặc `is_r
 - Settings: theme System / Light / Dark (lưu XDG config).
 - About: logo, version, developer, repo và issues.
 - Giao diện libadwaita (theme theo hệ thống hoặc ép Light/Dark).
+
+### Phân loại service
+
+`UnitCategory` gắn trên mỗi `UnitSummary` sau `list_services`:
+
+| Category | Cách nhận biết |
+|----------|----------------|
+| System | Vendor path (`/usr/lib`, `/lib`) + heuristic tên core OS |
+| Application | Vendor path nhưng không phải core (mặc định chip) |
+| Custom | `/etc/systemd/system`, `/usr/local/lib/systemd/...` |
+| User | User session scope (chip sẵn; list user bus có thể bổ sung) |
+| Generated | `/run/systemd/generator*`, state `generated`/`transient` |
+
+Logic thuần trong `src/utils/unit_category.rs`; UI chỉ filter theo chip.
 
 ## Lệnh Phát Triển
 

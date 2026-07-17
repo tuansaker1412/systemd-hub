@@ -1,17 +1,25 @@
-//! Service list with search, sort, and ColumnView.
+//! Service list with search, category chips, sort, and ColumnView.
 
 use gtk4::prelude::*;
 use gtk4::{
     self as gtk, gio, Align, CheckButton, ColumnView, ColumnViewColumn, CustomFilter, CustomSorter,
-    FilterChange, FilterListModel, Image, Label, MultiSorter, Orientation, ScrolledWindow,
-    SearchEntry, SignalListItemFactory, SingleSelection, SortListModel,
+    FilterChange, FilterListModel, Image, Label, MultiSorter, Orientation, PolicyType,
+    ScrolledWindow, SearchEntry, SignalListItemFactory, SingleSelection, SortListModel,
+    ToggleButton,
 };
 use libadwaita as adw;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use crate::models::{StateTone, UnitSummary};
+use crate::models::{StateTone, UnitCategory, UnitSummary};
 use crate::ui::UnitObject;
+
+/// Active category chip: one category or All.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CategoryFilter {
+    All,
+    Only(UnitCategory),
+}
 
 /// Adwaita semantic CSS classes used for state labels/icons.
 const TONE_CLASSES: &[&str] = &["success", "warning", "error", "dimmed"];
@@ -63,6 +71,8 @@ pub struct ServiceListPage {
     column_view: ColumnView,
     filter: CustomFilter,
     status_label: Label,
+    total_count: Rc<Cell<u32>>,
+    category_filter: Rc<Cell<CategoryFilter>>,
     /// When true, selection signals are ignored (list rebuild / programmatic select).
     suppress_selection: Rc<Cell<bool>>,
 }
@@ -73,11 +83,23 @@ impl ServiceListPage {
 
         let search_text = Rc::new(RefCell::new(String::new()));
         let search_text_filter = search_text.clone();
+        // Default: Applications — what users care about most.
+        let category_filter = Rc::new(Cell::new(CategoryFilter::Only(UnitCategory::Application)));
+        let category_filter_for_match = category_filter.clone();
 
         let filter = CustomFilter::new(move |obj| {
             let Some(unit) = obj.downcast_ref::<UnitObject>() else {
                 return false;
             };
+
+            let cat_ok = match category_filter_for_match.get() {
+                CategoryFilter::All => true,
+                CategoryFilter::Only(cat) => unit.category() == cat,
+            };
+            if !cat_ok {
+                return false;
+            }
+
             let q = search_text_filter.borrow().to_lowercase();
             if q.is_empty() {
                 return true;
@@ -87,6 +109,7 @@ impl ServiceListPage {
                 || unit.active_state().to_lowercase().contains(&q)
                 || unit.sub_state().to_lowercase().contains(&q)
                 || unit.enabled_state().to_lowercase().contains(&q)
+                || unit.category().label().to_lowercase().contains(&q)
         });
 
         let filter_model = FilterListModel::new(Some(store.clone()), Some(filter.clone()));
@@ -186,6 +209,8 @@ impl ServiceListPage {
             .hexpand(true)
             .build();
 
+        let total_count = Rc::new(Cell::new(0u32));
+
         let search_bar = gtk::Box::new(Orientation::Horizontal, 8);
         search_bar.set_margin_start(8);
         search_bar.set_margin_end(8);
@@ -193,6 +218,85 @@ impl ServiceListPage {
         search_bar.set_margin_bottom(6);
         search_bar.append(&search_entry);
         search_bar.append(&refresh_btn);
+
+        let chip_box = gtk::Box::new(Orientation::Horizontal, 6);
+        chip_box.set_margin_start(8);
+        chip_box.set_margin_end(8);
+        chip_box.set_margin_top(0);
+        chip_box.set_margin_bottom(8);
+        chip_box.add_css_class("linked");
+
+        let chips: &[(CategoryFilter, &str, &str)] = &[
+            (
+                CategoryFilter::Only(UnitCategory::Application),
+                "Applications",
+                "Packaged applications (nginx, docker, …)",
+            ),
+            (
+                CategoryFilter::Only(UnitCategory::System),
+                "System",
+                "Core OS and infrastructure services",
+            ),
+            (
+                CategoryFilter::Only(UnitCategory::Custom),
+                "Custom",
+                "Units under /etc or /usr/local",
+            ),
+            (
+                CategoryFilter::Only(UnitCategory::User),
+                "User",
+                "User-session services (systemctl --user)",
+            ),
+            (
+                CategoryFilter::Only(UnitCategory::Generated),
+                "Generated",
+                "Generator and transient units",
+            ),
+            (CategoryFilter::All, "All", "All services"),
+        ];
+
+        let mut group_anchor: Option<ToggleButton> = None;
+        for (value, label, tooltip) in chips {
+            let btn = ToggleButton::with_label(label);
+            btn.set_tooltip_text(Some(tooltip));
+            if let Some(anchor) = &group_anchor {
+                btn.set_group(Some(anchor));
+            } else {
+                group_anchor = Some(btn.clone());
+            }
+            if *value == CategoryFilter::Only(UnitCategory::Application) {
+                btn.set_active(true);
+            }
+
+            let cat_state = category_filter.clone();
+            let filter_for_chip = filter.clone();
+            let status = status_label.clone();
+            let selection_for_status = selection.clone();
+            let total_for_status = total_count.clone();
+            let chip_value = *value;
+            btn.connect_toggled(move |btn| {
+                if !btn.is_active() {
+                    return;
+                }
+                cat_state.set(chip_value);
+                filter_for_chip.changed(FilterChange::Different);
+                Self::write_status_label(
+                    &status,
+                    selection_for_status.n_items(),
+                    total_for_status.get(),
+                    chip_value,
+                );
+            });
+            chip_box.append(&btn);
+        }
+
+        let chips_scroll = ScrolledWindow::builder()
+            .child(&chip_box)
+            .hexpand(true)
+            .hscrollbar_policy(PolicyType::Automatic)
+            .vscrollbar_policy(PolicyType::Never)
+            .build();
+        chips_scroll.set_propagate_natural_height(true);
 
         let header = adw::HeaderBar::new();
         header.set_title_widget(Some(
@@ -212,14 +316,25 @@ impl ServiceListPage {
         let toolbar = adw::ToolbarView::new();
         toolbar.add_top_bar(&header);
         toolbar.add_top_bar(&search_bar);
+        toolbar.add_top_bar(&chips_scroll);
         toolbar.set_content(Some(&scrolled));
         toolbar.add_bottom_bar(&bottom);
 
         let filter_for_search = filter.clone();
         let search_text_for_entry = search_text.clone();
+        let status_for_search = status_label.clone();
+        let selection_for_search = selection.clone();
+        let total_for_search = total_count.clone();
+        let cat_for_search = category_filter.clone();
         search_entry.connect_search_changed(move |entry| {
             *search_text_for_entry.borrow_mut() = entry.text().to_string();
             filter_for_search.changed(FilterChange::Different);
+            Self::write_status_label(
+                &status_for_search,
+                selection_for_search.n_items(),
+                total_for_search.get(),
+                cat_for_search.get(),
+            );
         });
 
         // Keep search widgets alive via the widget tree; only retain what methods need.
@@ -233,8 +348,54 @@ impl ServiceListPage {
             column_view,
             filter,
             status_label,
+            total_count,
+            category_filter,
             suppress_selection: Rc::new(Cell::new(false)),
         }
+    }
+
+    fn write_status_label(label: &Label, visible: u32, total: u32, category: CategoryFilter) {
+        if total == 0 {
+            label.set_label("No services loaded");
+            return;
+        }
+        let noun = match category {
+            CategoryFilter::All => {
+                if visible == 1 {
+                    "service"
+                } else {
+                    "services"
+                }
+            }
+            CategoryFilter::Only(c) => {
+                if visible == 1 {
+                    c.singular()
+                } else {
+                    // Prefer plural chip labels where natural.
+                    match c {
+                        UnitCategory::Application => "applications",
+                        UnitCategory::System => "system",
+                        UnitCategory::Custom => "custom",
+                        UnitCategory::User => "user",
+                        UnitCategory::Generated => "generated",
+                    }
+                }
+            }
+        };
+        if matches!(category, CategoryFilter::All) || visible == total {
+            label.set_label(&format!("{visible} {noun}"));
+        } else {
+            label.set_label(&format!("{visible} {noun} · {total} total"));
+        }
+    }
+
+    fn refresh_status(&self) {
+        Self::write_status_label(
+            &self.status_label,
+            self.selection.n_items(),
+            self.total_count.get(),
+            self.category_filter.get(),
+        );
     }
 
     fn text_column(
@@ -410,15 +571,13 @@ impl ServiceListPage {
     pub fn set_units(&self, units: Vec<UnitSummary>, select_name: Option<&str>) {
         self.suppress_selection.set(true);
         self.store.remove_all();
-        let count = units.len();
+        let count = units.len() as u32;
         for unit in units {
             self.store.append(&UnitObject::new(unit));
         }
-        self.status_label.set_label(&format!(
-            "{count} service{}",
-            if count == 1 { "" } else { "s" }
-        ));
+        self.total_count.set(count);
         self.filter.changed(FilterChange::Different);
+        self.refresh_status();
 
         if let Some(name) = select_name {
             let _ = self.select_by_name(name);

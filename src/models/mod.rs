@@ -6,4 +6,4 @@ mod unit;
 
 pub use settings::AppTheme;
 pub use system_info::SystemInfo;
-pub use unit::{ServiceAction, StateTone, UnitDetail, UnitSummary};
+pub use unit::{ServiceAction, StateTone, UnitCategory, UnitDetail, UnitSummary};

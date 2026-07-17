@@ -375,11 +375,7 @@ impl ServiceDetailPage {
 
         let tone = active_state_tone(&detail.active_state);
         let status_text = format!("{} · {}", detail.active_state, detail.sub_state);
-        self.set_status_chip(
-            &status_text,
-            active_state_icon(&detail.active_state),
-            tone,
-        );
+        self.set_status_chip(&status_text, active_state_icon(&detail.active_state), tone);
 
         let state = detail.enabled_state.as_str();
         self.set_enabled_switch(
@@ -397,11 +393,7 @@ impl ServiceDetailPage {
         self.stack.set_visible_child_name("detail");
         self.title.set_label(name);
         self.description.set_label("Loading…");
-        self.set_status_chip(
-            "Loading…",
-            "content-loading-symbolic",
-            StateTone::Warning,
-        );
+        self.set_status_chip("Loading…", "content-loading-symbolic", StateTone::Warning);
         self.set_enabled_switch(false, false, "Loading…");
         self.set_actions_enabled(false);
     }

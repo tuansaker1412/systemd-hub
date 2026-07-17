@@ -7,6 +7,7 @@ use zbus::zvariant::{DynamicType, OwnedObjectPath};
 use zbus::Connection;
 
 use crate::models::{ServiceAction, UnitDetail, UnitSummary};
+use crate::utils::{classify_unit, UnitScope};
 
 /// Tuple returned by Manager.ListUnits.
 type UnitTuple = (
@@ -140,6 +141,7 @@ impl SystemdClient {
             if name.ends_with("@.service") {
                 continue;
             }
+            let category = classify_unit(&path, &name, UnitScope::System, enabled_state.as_str());
             by_name.insert(
                 name.clone(),
                 UnitSummary {
@@ -150,6 +152,8 @@ impl SystemdClient {
                     sub_state: "dead".into(),
                     unit_path: String::new(),
                     enabled_state,
+                    unit_file_path: path,
+                    category,
                 },
             );
         }
@@ -162,10 +166,19 @@ impl SystemdClient {
                 continue;
             }
 
-            let enabled_state = by_name
-                .get(&name)
+            let existing = by_name.get(&name);
+            let enabled_state = existing
                 .map(|s| s.enabled_state.clone())
                 .unwrap_or_else(|| "unknown".into());
+            let unit_file_path = existing
+                .map(|s| s.unit_file_path.clone())
+                .unwrap_or_default();
+            let category = classify_unit(
+                &unit_file_path,
+                &name,
+                UnitScope::System,
+                enabled_state.as_str(),
+            );
 
             by_name.insert(
                 name.clone(),
@@ -177,15 +190,23 @@ impl SystemdClient {
                     sub_state,
                     unit_path: unit_path.to_string(),
                     enabled_state,
+                    unit_file_path,
+                    category,
                 },
             );
         }
 
-        // Prefer a clearer load_state label for unit-file-only rows.
+        // Prefer a clearer load_state label for unit-file-only rows; reclassify if needed.
         for summary in by_name.values_mut() {
             if summary.unit_path.is_empty() && summary.load_state == "not-found" {
                 summary.load_state = "unloaded".into();
             }
+            summary.category = classify_unit(
+                &summary.unit_file_path,
+                &summary.name,
+                UnitScope::System,
+                summary.enabled_state.as_str(),
+            );
         }
 
         let mut services: Vec<UnitSummary> = by_name.into_values().collect();
@@ -332,10 +353,7 @@ impl SystemdClient {
             }
             ServiceAction::Disable => {
                 // Runtime-enabled units live under /run and must be disabled with runtime=true.
-                let state = manager
-                    .get_unit_file_state(name)
-                    .await
-                    .unwrap_or_default();
+                let state = manager.get_unit_file_state(name).await.unwrap_or_default();
                 let runtime = matches!(
                     state.as_str(),
                     "enabled-runtime" | "linked-runtime" | "masked-runtime"
@@ -347,9 +365,7 @@ impl SystemdClient {
                     &(files, runtime),
                 )
                 .await
-                .with_context(|| {
-                    format!("DisableUnitFiles({name}, runtime={runtime}) failed")
-                })?;
+                .with_context(|| format!("DisableUnitFiles({name}, runtime={runtime}) failed"))?;
                 call_interactive::<()>(&manager, "Reload", &())
                     .await
                     .context("daemon-reload after disable failed")?;

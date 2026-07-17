@@ -1,5 +1,9 @@
 //! Shared helpers.
 
+mod unit_category;
+
+pub use unit_category::{classify_unit, UnitScope};
+
 /// Format a byte count into a human-readable string.
 pub fn format_bytes(bytes: u64) -> String {
     const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];

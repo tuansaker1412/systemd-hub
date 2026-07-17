@@ -1,5 +1,54 @@
 //! Systemd unit models.
 
+/// UX category for filtering services in the list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum UnitCategory {
+    /// Core OS / distro infrastructure (systemd-*, dbus, NetworkManager, …).
+    System,
+    /// Packaged applications (nginx, docker, tailscale, …).
+    Application,
+    /// Admin or manually installed units (`/etc`, `/usr/local`).
+    Custom,
+    /// User-session units (`systemctl --user`).
+    User,
+    /// Generator / transient / runtime units.
+    Generated,
+}
+
+impl UnitCategory {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::System => "system",
+            Self::Application => "application",
+            Self::Custom => "custom",
+            Self::User => "user",
+            Self::Generated => "generated",
+        }
+    }
+
+    /// Short chip / status label.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::System => "System",
+            Self::Application => "Applications",
+            Self::Custom => "Custom",
+            Self::User => "User",
+            Self::Generated => "Generated",
+        }
+    }
+
+    /// Singular noun for status bar (“1 system service”).
+    pub fn singular(self) -> &'static str {
+        match self {
+            Self::System => "system",
+            Self::Application => "application",
+            Self::Custom => "custom",
+            Self::User => "user",
+            Self::Generated => "generated",
+        }
+    }
+}
+
 /// Summary row for the service list.
 #[derive(Debug, Clone)]
 pub struct UnitSummary {
@@ -10,6 +59,9 @@ pub struct UnitSummary {
     pub sub_state: String,
     pub unit_path: String,
     pub enabled_state: String,
+    /// Absolute path of the unit file from ListUnitFiles / FragmentPath.
+    pub unit_file_path: String,
+    pub category: UnitCategory,
 }
 
 /// Visual tone for unit state labels in the UI.
@@ -170,6 +222,8 @@ mod tests {
             sub_state: sub.into(),
             unit_path: "/".into(),
             enabled_state: enabled.into(),
+            unit_file_path: String::new(),
+            category: UnitCategory::Application,
         }
     }
 

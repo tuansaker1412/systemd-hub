@@ -5,7 +5,7 @@ use gtk4::glib;
 use gtk4::subclass::prelude::*;
 use std::cell::RefCell;
 
-use crate::models::UnitSummary;
+use crate::models::{UnitCategory, UnitSummary};
 
 mod imp {
     use super::*;
@@ -66,5 +66,13 @@ impl UnitObject {
 
     pub fn status_label(&self) -> String {
         self.summary().status_label()
+    }
+
+    pub fn category(&self) -> UnitCategory {
+        self.summary().category
+    }
+
+    pub fn unit_file_path(&self) -> String {
+        self.summary().unit_file_path
     }
 }
